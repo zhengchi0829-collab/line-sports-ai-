@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 
-app = FastAPI(title="體育AI分析系統", version="0.3.5")
+app = FastAPI(title="體育AI分析系統", version="0.3.6")
 log = logging.getLogger("sports_bot")
 TZ = ZoneInfo("Asia/Taipei")
 MENU = ("歡迎使用【體育AI分析系統】！\n\n"
@@ -81,8 +81,49 @@ def menu_card():
         }
     }
 
+async def official_events(client, league, date):
+    if league == "baseball/mlb":
+        day = f"{date[:4]}-{date[4:6]}-{date[6:]}"
+        r = await client.get("https://statsapi.mlb.com/api/v1/schedule", params={"sportId": 1, "date": day}, timeout=2)
+        r.raise_for_status()
+        output = []
+        for group in r.json().get("dates", []):
+            for game in group.get("games", []):
+                sides = game.get("teams", {})
+                away, home = sides.get("away", {}), sides.get("home", {})
+                state = game.get("status", {}).get("abstractGameState", "")
+                output.append({"competitions": [{"competitors": [
+                    {"team": {"displayName": away.get("team", {}).get("name", "客隊")}, "score": str(away.get("score", "-"))},
+                    {"team": {"displayName": home.get("team", {}).get("name", "主隊")}, "score": str(home.get("score", "-"))}
+                ]}], "status": {"type": {"state": "post" if state == "Final" else ("in" if state == "Live" else "pre"),
+                    "shortDetail": game.get("status", {}).get("detailedState", "未開賽")}}})
+        return output
+    if league == "basketball/nba":
+        r = await client.get("https://cdn.nba.com/static/json/liveData/scoreboard/todaysScoreboard_00.json", timeout=2)
+        r.raise_for_status()
+        output = []
+        for game in r.json().get("scoreboard", {}).get("games", []):
+            if str(game.get("gameTimeUTC", ""))[:10].replace("-", "") != date:
+                continue
+            away, home = game.get("awayTeam", {}), game.get("homeTeam", {})
+            status = game.get("gameStatus", 1)
+            output.append({"competitions": [{"competitors": [
+                {"team": {"displayName": away.get("teamName", "客隊")}, "score": str(away.get("score", "-"))},
+                {"team": {"displayName": home.get("teamName", "主隊")}, "score": str(home.get("score", "-"))}
+            ]}], "status": {"type": {"state": "post" if status == 3 else ("in" if status == 2 else "pre"),
+                "shortDetail": game.get("gameStatusText", "未開賽")}}})
+        return output
+    return []
+
 async def get_events(client, league, date):
-    """Primary ESPN feed, with a separate free public sports-data fallback."""
+    """Prefer official public feeds for NBA and MLB."""
+    if league in ("baseball/mlb", "basketball/nba"):
+        try:
+            events = await official_events(client, league, date)
+            if events:
+                return events
+        except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+            log.warning("Official feed %s failed: %s", league, str(exc)[:120])
     url = f"https://site.api.espn.com/apis/site/v2/sports/{league}/scoreboard"
     try:
         response = await client.get(url, params={"dates": date}, timeout=2)
@@ -234,7 +275,7 @@ async def reply_for(text):
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "line-sports-ai", "version": "0.3.5"}
+    return {"status": "ok", "service": "line-sports-ai", "version": "0.3.6"}
 
 @app.post("/webhooks/line")
 async def webhook(request: Request, x_line_signature: str | None = Header(default=None)):
