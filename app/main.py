@@ -7,18 +7,18 @@ import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 
 app = FastAPI(title="LINE Sports AI", version="0.1.0")
-MENU = "歡迎使用體育AI分析系統！請輸入：選單、今日賽事、足球、籃球、棒球、AI預測、會員中心。"
+MENU = "歡迎使用【體育AI分析系統】！\n\n請輸入以下繁體中文指令：\n・選單\n・今日賽事\n・足球\n・籃球\n・棒球\n・AI預測\n・會員中心\n\n目前為測試版本，部分功能仍在建置中。"
 
 def reply_for(text: str) -> str:
     cmd = text.strip().replace(" ", "")
     if cmd in ("你好", "嗨", "開始", "選單", "幫助", "help"):
         return MENU
     if cmd in ("今日賽事", "未來賽事", "足球", "籃球", "棒球"):
-        return "賽事查詢功能正在建置，目前尚未接入即時資料，請稍後再試。"
+        return "【賽事查詢】\n目前尚未接入即時賽事資料，功能正在建置中，敬請期待。"
     if cmd in ("AI預測", "預測戰績"):
-        return "AI預測功能尚未上線，目前不提供未驗證的勝率或預測。"
+        return "【AI預測】\n此功能尚未正式開放。目前不提供未經驗證的勝率或賽事預測。"
     if cmd in ("會員中心", "VIP"):
-        return "會員功能正在建置，目前尚未開通付費服務。"
+        return "【會員中心】\n會員功能正在建置中，目前沒有開通任何付費服務。"
     return MENU
 
 @app.get("/")
