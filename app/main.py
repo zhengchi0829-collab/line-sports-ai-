@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 
-app = FastAPI(title="體育AI分析系統", version="0.3.0")
+app = FastAPI(title="體育AI分析系統", version="0.3.1")
 log = logging.getLogger("sports_bot")
 TZ = ZoneInfo("Asia/Taipei")
 MENU = ("歡迎使用【體育AI分析系統】！\n\n"
@@ -82,10 +82,41 @@ def menu_card():
     }
 
 async def get_events(client, league, date):
+    """Primary ESPN feed, with a separate free public sports-data fallback."""
     url = f"https://site.api.espn.com/apis/site/v2/sports/{league}/scoreboard"
-    response = await client.get(url, params={"dates": date}, timeout=9)
+    try:
+        response = await client.get(url, params={"dates": date}, timeout=6)
+        response.raise_for_status()
+        events = response.json().get("events", [])
+        if events:
+            return events
+    except (httpx.HTTPError, ValueError) as exc:
+        log.warning("ESPN %s unavailable: %s", league, str(exc)[:140])
+    # TheSportsDB free endpoint uses YYYY-MM-DD and returns a different schema.
+    sport = "Soccer" if league.startswith("soccer/") else ("Basketball" if "basketball/" in league else "Baseball")
+    day = f"{date[:4]}-{date[4:6]}-{date[6:]}"
+    response = await client.get(
+        "https://www.thesportsdb.com/api/v1/json/3/eventsday.php",
+        params={"d": day, "s": sport}, timeout=7)
     response.raise_for_status()
-    return response.json().get("events", [])
+    raw = response.json().get("events") or []
+    keyword = {"soccer/eng.1": "English Premier League",
+               "soccer/esp.1": "Spanish La Liga",
+               "soccer/uefa.champions": "Champions League",
+               "basketball/nba": "NBA", "baseball/mlb": "MLB"}.get(league, "")
+    matches = [e for e in raw if keyword.lower() in (e.get("strLeague") or "").lower()]
+    events = []
+    for e in matches:
+        home, away = e.get("strHomeTeam"), e.get("strAwayTeam")
+        if not home or not away:
+            continue
+        played = e.get("intHomeScore") is not None and e.get("intAwayScore") is not None
+        events.append({"competitions": [{"competitors": [
+            {"team": {"displayName": home, "shortDisplayName": home}, "score": str(e.get("intHomeScore") or "-")},
+            {"team": {"displayName": away, "shortDisplayName": away}, "score": str(e.get("intAwayScore") or "-")}
+        ]}], "status": {"type": {"state": "post" if played else "pre",
+              "shortDetail": e.get("strStatus") or e.get("strTime") or "賽程待確認"}}})
+    return events
 
 def event_line(event):
     competition = (event.get("competitions") or [{}])[0]
@@ -196,7 +227,7 @@ async def reply_for(text):
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "line-sports-ai", "version": "0.3.0"}
+    return {"status": "ok", "service": "line-sports-ai", "version": "0.3.1"}
 
 @app.post("/webhooks/line")
 async def webhook(request: Request, x_line_signature: str | None = Header(default=None)):
