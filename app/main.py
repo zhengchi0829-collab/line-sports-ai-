@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 
-app = FastAPI(title="體育AI分析系統", version="0.3.1")
+app = FastAPI(title="體育AI分析系統", version="0.3.2")
 log = logging.getLogger("sports_bot")
 TZ = ZoneInfo("Asia/Taipei")
 MENU = ("歡迎使用【體育AI分析系統】！\n\n"
@@ -96,7 +96,7 @@ async def get_events(client, league, date):
     sport = "Soccer" if league.startswith("soccer/") else ("Basketball" if "basketball/" in league else "Baseball")
     day = f"{date[:4]}-{date[4:6]}-{date[6:]}"
     response = await client.get(
-        "https://www.thesportsdb.com/api/v1/json/3/eventsday.php",
+        "https://www.thesportsdb.com/api/v1/json/123/eventsday.php",
         params={"d": day, "s": sport}, timeout=7)
     response.raise_for_status()
     raw = response.json().get("events") or []
@@ -227,7 +227,7 @@ async def reply_for(text):
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "line-sports-ai", "version": "0.3.1"}
+    return {"status": "ok", "service": "line-sports-ai", "version": "0.3.2"}
 
 @app.post("/webhooks/line")
 async def webhook(request: Request, x_line_signature: str | None = Header(default=None)):
