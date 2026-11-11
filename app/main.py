@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 
-app = FastAPI(title="體育AI分析系統", version="0.3.2")
+app = FastAPI(title="體育AI分析系統", version="0.3.3")
 log = logging.getLogger("sports_bot")
 TZ = ZoneInfo("Asia/Taipei")
 MENU = ("歡迎使用【體育AI分析系統】！\n\n"
@@ -85,7 +85,7 @@ async def get_events(client, league, date):
     """Primary ESPN feed, with a separate free public sports-data fallback."""
     url = f"https://site.api.espn.com/apis/site/v2/sports/{league}/scoreboard"
     try:
-        response = await client.get(url, params={"dates": date}, timeout=6)
+        response = await client.get(url, params={"dates": date}, timeout=2)
         response.raise_for_status()
         events = response.json().get("events", [])
         if events:
@@ -97,7 +97,7 @@ async def get_events(client, league, date):
     day = f"{date[:4]}-{date[4:6]}-{date[6:]}"
     response = await client.get(
         "https://www.thesportsdb.com/api/v1/json/123/eventsday.php",
-        params={"d": day, "s": sport}, timeout=7)
+        params={"d": day, "s": sport}, timeout=3)
     response.raise_for_status()
     raw = response.json().get("events") or []
     keyword = {"soccer/eng.1": "English Premier League",
@@ -227,7 +227,7 @@ async def reply_for(text):
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "line-sports-ai", "version": "0.3.2"}
+    return {"status": "ok", "service": "line-sports-ai", "version": "0.3.3"}
 
 @app.post("/webhooks/line")
 async def webhook(request: Request, x_line_signature: str | None = Header(default=None)):
@@ -248,7 +248,12 @@ async def webhook(request: Request, x_line_signature: str | None = Header(defaul
             if event.get("type") == "follow":
                 message = MENU
             elif event.get("type") == "message" and event.get("message", {}).get("type") == "text":
-                message = await reply_for(event["message"].get("text", ""))
+                try:
+                    import asyncio
+                    message = await asyncio.wait_for(reply_for(event["message"].get("text", "")), timeout=7)
+                except Exception as exc:
+                    log.error("Sports reply timed out or failed: %s", str(exc)[:160])
+                    message = "【體育AI分析系統】目前賽事資料暫時無法取得，機器人已恢復回覆。請稍後再試或輸入「選單」。"
             else:
                 continue
             try:
