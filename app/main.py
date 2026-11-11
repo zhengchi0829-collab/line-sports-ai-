@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 
-app = FastAPI(title="體育AI分析系統", version="0.3.4")
+app = FastAPI(title="體育AI分析系統", version="0.3.5")
 log = logging.getLogger("sports_bot")
 TZ = ZoneInfo("Asia/Taipei")
 MENU = ("歡迎使用【體育AI分析系統】！\n\n"
@@ -166,57 +166,44 @@ async def sports_report(sport, analysis=False, future=False):
     lines = [f"【{sport}{'賽事分析' if analysis else '賽事'}】{now:%Y/%m/%d}（台灣時間）"]
     total = 0
     errors = 0
-    async with httpx.AsyncClient(headers={"User-Agent": "SportsAI-LineBot/0.2"}) as client:
-        for title, league in leagues:
+    import asyncio
+    async with httpx.AsyncClient(headers={"User-Agent": "SportsAI-LineBot/0.4"}) as client:
+        async def fetch(title, league, offset):
+            day = (now + timedelta(days=offset)).strftime("%Y%m%d")
             try:
-                events = await get_events(client, league, date)
-                if not events:
+                events = await asyncio.wait_for(get_events(client, league, day), timeout=2.3)
+                return title, offset, events, False
+            except (httpx.HTTPError, ValueError, KeyError, TypeError, asyncio.TimeoutError) as exc:
+                log.warning("Sports feed %s %s: %s", league, day, str(exc)[:100])
+                return title, offset, [], True
+        offset = 1 if future else 0
+        found = await asyncio.gather(*(fetch(title, league, offset) for title, league in leagues))
+        errors = sum(1 for _, _, _, failed in found if failed)
+        if not any(events for _, _, events, _ in found):
+            # Search two nearby dates in parallel; bounded to protect LINE reply time.
+            offsets = (2, 7) if future else (1, 7)
+            nearby = await asyncio.gather(*(fetch(title, league, d) for d in offsets for title, league in leagues))
+            for d in offsets:
+                candidate = [x for x in nearby if x[1] == d]
+                if any(x[2] for x in candidate):
+                    found = candidate
+                    lines.append(f"今日無已收錄賽事，顯示近期賽程：{(now + timedelta(days=d)):%Y/%m/%d}")
+                    break
+        for title, day_offset, events, _ in found:
+            if not events:
+                continue
+            lines.append(f"\\n〔{title}｜{(now + timedelta(days=day_offset)):%Y/%m/%d}〕")
+            for event in events[:4]:
+                summary = event_line(event)
+                if not summary:
                     continue
-                lines.append(f"\n〔{title}〕")
-                for event in events[:4]:
-                    summary = event_line(event)
-                    if summary:
-                        lines.append(summary)
-                        total += 1
-                        if analysis:
-                            competition = (event.get("competitions") or [{}])[0]
-                            competitors = competition.get("competitors") or []
-                            records = []
-                            for team in competitors:
-                                rec = team.get("records") or []
-                                if rec:
-                                    records.append(f"{team.get('team', {}).get('shortDisplayName', '球隊')}：{rec[0].get('summary', '資料不足')}")
-                            if records:
-                                lines.append("公開戰績：" + "；".join(records))
-                            if sport != "足球":
-                                lines.append(estimate_match(competitors))
-            except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
-                errors += 1
-                log.warning("Sports data unavailable for %s: %s", league, str(exc)[:160])
+                lines.append(summary)
+                total += 1
+                if analysis and sport != "足球":
+                    competitors = (event.get("competitions") or [{}])[0].get("competitors") or []
+                    lines.append(estimate_match(competitors))
     if not total:
-        # When no matches today, search the nearest future fixtures and then recent results.
-        import asyncio
-        async with httpx.AsyncClient(headers={"User-Agent": "SportsAI-LineBot/0.3"}) as client:
-            for offset in (1, 3, 7, 14, 30, -1, -3, -7):
-                day = (now + timedelta(days=offset)).strftime("%Y%m%d")
-                async def nearby(title, league):
-                    try:
-                        return title, await get_events(client, league, day)
-                    except (httpx.HTTPError, ValueError, KeyError, TypeError):
-                        return title, []
-                found = await asyncio.gather(*(nearby(title, league) for title, league in leagues))
-                if any(events for _, events in found):
-                    label = "未來賽程" if offset > 0 else "近期賽果"
-                    result = [f"【{sport}】今天沒有已收錄賽事。\\n最近可查詢的{label}：{(now + timedelta(days=offset)):%Y/%m/%d}"]
-                    for title, events in found:
-                        if events:
-                            result.append(f"〔{title}〕")
-                            result.extend(filter(None, (event_line(e) for e in events[:4])))
-                    result.append("資料來源：ESPN / TheSportsDB；可能延遲。")
-                    return "\\n".join(result)[:4800]
-        if errors:
-            return f"【{sport}】目前無法取得即時資料，請稍後再試。"
-        return f"【{sport}】今天查無已收錄賽事。可稍後再查詢。"
+        return f"【{sport}】目前沒有可取得的近期賽事資料。可稍後再試，或輸入「選單」。"
     if analysis:
         lines.append("\n【數據說明】以上為公開戰績與簡易統計估算，並非訓練完成的 AI 模型預測，也不保證比賽結果。")
     else:
@@ -247,7 +234,7 @@ async def reply_for(text):
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "line-sports-ai", "version": "0.3.4"}
+    return {"status": "ok", "service": "line-sports-ai", "version": "0.3.5"}
 
 @app.post("/webhooks/line")
 async def webhook(request: Request, x_line_signature: str | None = Header(default=None)):
