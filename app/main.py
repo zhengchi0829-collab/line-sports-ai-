@@ -3,7 +3,7 @@ import hashlib
 import hmac
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -15,7 +15,7 @@ TZ = ZoneInfo("Asia/Taipei")
 MENU = ("歡迎使用【體育AI分析系統】！\n\n"
         "請點選下方快捷按鈕，或輸入：\n"
         "今日賽事｜足球｜籃球｜棒球｜賽事分析｜會員中心")
-BUTTONS = ["今日賽事", "足球", "籃球", "棒球", "賽事分析", "選單"]
+BUTTONS = ["今日賽事", "未來賽事", "足球", "籃球", "棒球", "賽事分析", "會員中心", "選單"]
 SPORTS = {
     "足球": [("英超", "soccer/eng.1"), ("西甲", "soccer/esp.1"), ("歐冠", "soccer/uefa.champions")],
     "籃球": [("NBA", "basketball/nba")],
@@ -37,7 +37,7 @@ def menu_card():
         ("🏀 籃球", "籃球", "#C2410C"),
         ("⚾ 棒球", "棒球", "#7C3AED"),
         ("📊 賽事分析", "賽事分析", "#334155"),
-        ("👤 會員中心", "會員中心", "#334155"),
+        ("🗓 未來賽事", "未來賽事", "#334155"),
     ]
     def button(label, command, color):
         return {
@@ -103,9 +103,9 @@ def event_line(event):
         outcome = details
     return f"{names[0]} vs {names[1]}\n{outcome}"
 
-async def sports_report(sport, analysis=False):
+async def sports_report(sport, analysis=False, future=False):
     now = datetime.now(TZ)
-    date = now.strftime("%Y%m%d")
+    date = (now + timedelta(days=1)).strftime("%Y%m%d") if future else now.strftime("%Y%m%d")
     leagues = SPORTS.get(sport, [])
     lines = [f"【{sport}{'賽事分析' if analysis else '賽事'}】{now:%Y/%m/%d}（台灣時間）"]
     total = 0
@@ -134,7 +134,7 @@ async def sports_report(sport, analysis=False):
                                 lines.append("公開戰績：" + "；".join(records))
             except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
                 errors += 1
-                log.warning("Sports data unavailable for %s: %s", league, type(exc).__name__)
+                log.warning("Sports data unavailable for %s: %s", league, str(exc)[:160])
     if not total:
         if errors:
             return f"【{sport}】目前無法取得即時資料，請稍後再試。"
@@ -155,7 +155,7 @@ async def reply_for(text):
     if cmd in ("今日賽事", "未來賽事"):
         results = []
         for sport in SPORTS:
-            results.append(await sports_report(sport))
+            results.append(await sports_report(sport, future=(cmd == "未來賽事")))
         return "\n\n".join(results)[:4800]
     if cmd in ("賽事分析", "AI分析", "AI預測", "預測戰績"):
         return ("【賽事數據分析】\n請輸入「分析足球」、「分析籃球」或「分析棒球」，"
@@ -163,7 +163,7 @@ async def reply_for(text):
     if cmd.startswith("分析") and cmd[2:] in SPORTS:
         return await sports_report(cmd[2:], analysis=True)
     if cmd in ("會員中心", "VIP"):
-        return "【會員中心】\n會員功能仍在建置，目前沒有開通任何付費服務。"
+        return "【會員中心】\n目前賽事查詢與公開數據分析免費使用。\n尚未開放註冊、登入、付費或訂閱。"
     return MENU
 
 @app.get("/")
