@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 
-app = FastAPI(title="體育AI分析系統", version="0.2.0")
+app = FastAPI(title="體育AI分析系統", version="0.3.0")
 log = logging.getLogger("sports_bot")
 TZ = ZoneInfo("Asia/Taipei")
 MENU = ("歡迎使用【體育AI分析系統】！\n\n"
@@ -103,6 +103,31 @@ def event_line(event):
         outcome = details
     return f"{names[0]} vs {names[1]}\n{outcome}"
 
+def record_rate(team):
+    for rec in team.get("records") or []:
+        parts = str(rec.get("summary", "")).split("-")
+        if len(parts) >= 2:
+            try:
+                w, l = float(parts[0]), float(parts[1])
+                t = float(parts[2]) if len(parts) > 2 else 0
+                n = w + l + t
+                if n >= 3:
+                    return (w + t * 0.5) / n, int(n)
+            except (ValueError, TypeError):
+                continue
+    return None
+
+def estimate_match(teams):
+    if len(teams) != 2:
+        return "勝率估算：資料不足"
+    a, b = record_rate(teams[0]), record_rate(teams[1])
+    if a is None or b is None:
+        return "勝率估算：戰績樣本不足"
+    p = max(0.05, min(0.95, (a[0] + 1 - b[0]) / 2))
+    n1 = teams[0].get("team", {}).get("shortDisplayName", "隊伍一")
+    n2 = teams[1].get("team", {}).get("shortDisplayName", "隊伍二")
+    return f"戰績基準估算：{n1} {p:.0%}｜{n2} {1-p:.0%}（樣本 {a[1]}/{b[1]} 場）"
+
 async def sports_report(sport, analysis=False, future=False):
     now = datetime.now(TZ)
     date = (now + timedelta(days=1)).strftime("%Y%m%d") if future else now.strftime("%Y%m%d")
@@ -132,6 +157,8 @@ async def sports_report(sport, analysis=False, future=False):
                                     records.append(f"{team.get('team', {}).get('shortDisplayName', '球隊')}：{rec[0].get('summary', '資料不足')}")
                             if records:
                                 lines.append("公開戰績：" + "；".join(records))
+                            if sport != "足球":
+                                lines.append(estimate_match(competitors))
             except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
                 errors += 1
                 log.warning("Sports data unavailable for %s: %s", league, str(exc)[:160])
@@ -140,7 +167,7 @@ async def sports_report(sport, analysis=False, future=False):
             return f"【{sport}】目前無法取得即時資料，請稍後再試。"
         return f"【{sport}】今天查無已收錄賽事。可稍後再查詢。"
     if analysis:
-        lines.append("\n【數據說明】以上為公開賽況與可取得的戰績摘要，並非 AI 勝率預測，也不保證比賽結果。")
+        lines.append("\n【數據說明】以上為公開戰績與簡易統計估算，並非訓練完成的 AI 模型預測，也不保證比賽結果。")
     else:
         lines.append("\n資料來源：ESPN 公開賽事資訊；可能有更新延遲。")
     result = "\n".join(lines)
@@ -159,7 +186,7 @@ async def reply_for(text):
         return "\n\n".join(results)[:4800]
     if cmd in ("賽事分析", "AI分析", "AI預測", "預測戰績"):
         return ("【賽事數據分析】\n請輸入「分析足球」、「分析籃球」或「分析棒球」，"
-                "查看今天已收錄賽事及公開戰績。\n目前不提供 AI 勝率預測。")
+                "查看今天已收錄賽事及公開戰績。\n目前提供簡易統計估算，尚非 AI 模型預測。")
     if cmd.startswith("分析") and cmd[2:] in SPORTS:
         return await sports_report(cmd[2:], analysis=True)
     if cmd in ("會員中心", "VIP"):
@@ -169,7 +196,7 @@ async def reply_for(text):
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "line-sports-ai", "version": "0.2.0"}
+    return {"status": "ok", "service": "line-sports-ai", "version": "0.3.0"}
 
 @app.post("/webhooks/line")
 async def webhook(request: Request, x_line_signature: str | None = Header(default=None)):
