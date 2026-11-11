@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 
-app = FastAPI(title="體育AI分析系統", version="0.3.3")
+app = FastAPI(title="體育AI分析系統", version="0.3.4")
 log = logging.getLogger("sports_bot")
 TZ = ZoneInfo("Asia/Taipei")
 MENU = ("歡迎使用【體育AI分析系統】！\n\n"
@@ -194,6 +194,26 @@ async def sports_report(sport, analysis=False, future=False):
                 errors += 1
                 log.warning("Sports data unavailable for %s: %s", league, str(exc)[:160])
     if not total:
+        # When no matches today, search the nearest future fixtures and then recent results.
+        import asyncio
+        async with httpx.AsyncClient(headers={"User-Agent": "SportsAI-LineBot/0.3"}) as client:
+            for offset in (1, 3, 7, 14, 30, -1, -3, -7):
+                day = (now + timedelta(days=offset)).strftime("%Y%m%d")
+                async def nearby(title, league):
+                    try:
+                        return title, await get_events(client, league, day)
+                    except (httpx.HTTPError, ValueError, KeyError, TypeError):
+                        return title, []
+                found = await asyncio.gather(*(nearby(title, league) for title, league in leagues))
+                if any(events for _, events in found):
+                    label = "未來賽程" if offset > 0 else "近期賽果"
+                    result = [f"【{sport}】今天沒有已收錄賽事。\\n最近可查詢的{label}：{(now + timedelta(days=offset)):%Y/%m/%d}"]
+                    for title, events in found:
+                        if events:
+                            result.append(f"〔{title}〕")
+                            result.extend(filter(None, (event_line(e) for e in events[:4])))
+                    result.append("資料來源：ESPN / TheSportsDB；可能延遲。")
+                    return "\\n".join(result)[:4800]
         if errors:
             return f"【{sport}】目前無法取得即時資料，請稍後再試。"
         return f"【{sport}】今天查無已收錄賽事。可稍後再查詢。"
@@ -227,7 +247,7 @@ async def reply_for(text):
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "line-sports-ai", "version": "0.3.3"}
+    return {"status": "ok", "service": "line-sports-ai", "version": "0.3.4"}
 
 @app.post("/webhooks/line")
 async def webhook(request: Request, x_line_signature: str | None = Header(default=None)):
