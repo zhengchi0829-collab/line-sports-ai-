@@ -1,59 +1,155 @@
 import base64
 import hashlib
 import hmac
+import logging
 import os
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 
-app = FastAPI(title="LINE Sports AI", version="0.1.0")
-MENU = "歡迎使用【體育AI分析系統】！\n\n請輸入以下繁體中文指令：\n・選單\n・今日賽事\n・足球\n・籃球\n・棒球\n・AI預測\n・會員中心\n\n目前為測試版本，部分功能仍在建置中。"
+app = FastAPI(title="體育AI分析系統", version="0.2.0")
+log = logging.getLogger("sports_bot")
+TZ = ZoneInfo("Asia/Taipei")
+MENU = ("歡迎使用【體育AI分析系統】！\n\n"
+        "請點選下方快捷按鈕，或輸入：\n"
+        "今日賽事｜足球｜籃球｜棒球｜賽事分析｜會員中心")
+BUTTONS = ["今日賽事", "足球", "籃球", "棒球", "賽事分析", "選單"]
+SPORTS = {
+    "足球": [("英超", "soccer/eng.1"), ("西甲", "soccer/esp.1"), ("歐冠", "soccer/uefa.champions")],
+    "籃球": [("NBA", "basketball/nba")],
+    "棒球": [("MLB", "baseball/mlb")],
+}
 
-def reply_for(text: str) -> str:
+def quick_replies():
+    return {"items": [
+        {"type": "action", "action": {"type": "message", "label": name, "text": name}}
+        for name in BUTTONS
+    ]}
+
+async def get_events(client, league, date):
+    url = f"https://site.api.espn.com/apis/site/v2/sports/{league}/scoreboard"
+    response = await client.get(url, params={"dates": date}, timeout=9)
+    response.raise_for_status()
+    return response.json().get("events", [])
+
+def event_line(event):
+    competition = (event.get("competitions") or [{}])[0]
+    teams = competition.get("competitors") or []
+    names = [t.get("team", {}).get("displayName", "未知球隊") for t in teams]
+    if len(names) < 2:
+        return None
+    status = event.get("status", {}).get("type", {})
+    state = status.get("state", "pre")
+    details = status.get("shortDetail") or status.get("detail") or ""
+    if state in ("in", "post"):
+        score = " - ".join(t.get("score", "-") for t in teams)
+        outcome = f"比分 {score}｜{details}"
+    else:
+        outcome = details
+    return f"{names[0]} vs {names[1]}\n{outcome}"
+
+async def sports_report(sport, analysis=False):
+    now = datetime.now(TZ)
+    date = now.strftime("%Y%m%d")
+    leagues = SPORTS.get(sport, [])
+    lines = [f"【{sport}{'賽事分析' if analysis else '賽事'}】{now:%Y/%m/%d}（台灣時間）"]
+    total = 0
+    errors = 0
+    async with httpx.AsyncClient(headers={"User-Agent": "SportsAI-LineBot/0.2"}) as client:
+        for title, league in leagues:
+            try:
+                events = await get_events(client, league, date)
+                if not events:
+                    continue
+                lines.append(f"\n〔{title}〕")
+                for event in events[:4]:
+                    summary = event_line(event)
+                    if summary:
+                        lines.append(summary)
+                        total += 1
+                        if analysis:
+                            competition = (event.get("competitions") or [{}])[0]
+                            competitors = competition.get("competitors") or []
+                            records = []
+                            for team in competitors:
+                                rec = team.get("records") or []
+                                if rec:
+                                    records.append(f"{team.get('team', {}).get('shortDisplayName', '球隊')}：{rec[0].get('summary', '資料不足')}")
+                            if records:
+                                lines.append("公開戰績：" + "；".join(records))
+            except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+                errors += 1
+                log.warning("Sports data unavailable for %s: %s", league, type(exc).__name__)
+    if not total:
+        if errors:
+            return f"【{sport}】目前無法取得即時資料，請稍後再試。"
+        return f"【{sport}】今天查無已收錄賽事。可稍後再查詢。"
+    if analysis:
+        lines.append("\n【數據說明】以上為公開賽況與可取得的戰績摘要，並非 AI 勝率預測，也不保證比賽結果。")
+    else:
+        lines.append("\n資料來源：ESPN 公開賽事資訊；可能有更新延遲。")
+    result = "\n".join(lines)
+    return result[:4800]
+
+async def reply_for(text):
     cmd = text.strip().replace(" ", "")
     if cmd in ("你好", "嗨", "開始", "選單", "幫助", "help"):
         return MENU
-    if cmd in ("今日賽事", "未來賽事", "足球", "籃球", "棒球"):
-        return "【賽事查詢】\n目前尚未接入即時賽事資料，功能正在建置中，敬請期待。"
-    if cmd in ("AI預測", "預測戰績"):
-        return "【AI預測】\n此功能尚未正式開放。目前不提供未經驗證的勝率或賽事預測。"
+    if cmd in SPORTS:
+        return await sports_report(cmd)
+    if cmd in ("今日賽事", "未來賽事"):
+        results = []
+        for sport in SPORTS:
+            results.append(await sports_report(sport))
+        return "\n\n".join(results)[:4800]
+    if cmd in ("賽事分析", "AI分析", "AI預測", "預測戰績"):
+        return ("【賽事數據分析】\n請輸入「分析足球」、「分析籃球」或「分析棒球」，"
+                "查看今天已收錄賽事及公開戰績。\n目前不提供 AI 勝率預測。")
+    if cmd.startswith("分析") and cmd[2:] in SPORTS:
+        return await sports_report(cmd[2:], analysis=True)
     if cmd in ("會員中心", "VIP"):
-        return "【會員中心】\n會員功能正在建置中，目前沒有開通任何付費服務。"
+        return "【會員中心】\n會員功能仍在建置，目前沒有開通任何付費服務。"
     return MENU
 
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "line-sports-ai"}
+    return {"status": "ok", "service": "line-sports-ai", "version": "0.2.0"}
 
 @app.post("/webhooks/line")
 async def webhook(request: Request, x_line_signature: str | None = Header(default=None)):
     secret = os.getenv("LINE_CHANNEL_SECRET", "")
     token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "")
     raw = await request.body()
-    if not secret:
-        raise HTTPException(503, "LINE channel secret not configured")
+    if not secret or not token:
+        raise HTTPException(503, "LINE credentials not configured")
     expected = base64.b64encode(hmac.new(secret.encode(), raw, hashlib.sha256).digest()).decode()
     if not x_line_signature or not hmac.compare_digest(expected, x_line_signature):
         raise HTTPException(401, "Invalid signature")
-    if not token:
-        raise HTTPException(503, "LINE channel access token not configured")
     payload = await request.json()
-    for event in payload.get("events", []):
-        reply_token = event.get("replyToken")
-        if not reply_token:
-            continue
-        if event.get("type") == "follow":
-            message = MENU
-        elif event.get("type") == "message" and event.get("message", {}).get("type") == "text":
-            message = reply_for(event["message"].get("text", ""))
-        else:
-            continue
-        async with httpx.AsyncClient(timeout=8) as client:
-            result = await client.post(
-                "https://api.line.me/v2/bot/message/reply",
-                headers={"Authorization": f"Bearer {token}"},
-                json={"replyToken": reply_token, "messages": [{"type": "text", "text": message}]},
-            )
-            result.raise_for_status()
+    async with httpx.AsyncClient(timeout=9) as client:
+        for event in payload.get("events", []):
+            reply_token = event.get("replyToken")
+            if not reply_token:
+                continue
+            if event.get("type") == "follow":
+                message = MENU
+            elif event.get("type") == "message" and event.get("message", {}).get("type") == "text":
+                message = await reply_for(event["message"].get("text", ""))
+            else:
+                continue
+            try:
+                result = await client.post(
+                    "https://api.line.me/v2/bot/message/reply",
+                    headers={"Authorization": f"Bearer {token}"},
+                    json={"replyToken": reply_token, "messages": [
+                        {"type": "text", "text": message, "quickReply": quick_replies()}
+                    ]},
+                )
+                result.raise_for_status()
+            except httpx.HTTPError as exc:
+                log.error("LINE reply failed: %s", type(exc).__name__)
+                raise HTTPException(502, "LINE reply failed") from exc
     return {"ok": True}
