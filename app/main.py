@@ -28,6 +28,59 @@ def quick_replies():
         for name in BUTTONS
     ]}
 
+
+def menu_card():
+    """LINE Flex Message: polished two-column navigation card."""
+    entries = [
+        ("📅 今日賽事", "今日賽事", "#2563EB"),
+        ("⚽ 足球", "足球", "#0F766E"),
+        ("🏀 籃球", "籃球", "#C2410C"),
+        ("⚾ 棒球", "棒球", "#7C3AED"),
+        ("📊 賽事分析", "賽事分析", "#334155"),
+        ("👤 會員中心", "會員中心", "#334155"),
+    ]
+    def button(label, command, color):
+        return {
+            "type": "button", "style": "primary", "color": color, "height": "sm",
+            "flex": 1, "action": {"type": "message", "label": label, "text": command}
+        }
+    rows = []
+    for i in range(0, len(entries), 2):
+        rows.append({
+            "type": "box", "layout": "horizontal", "spacing": "sm",
+            "contents": [button(*entries[i]), button(*entries[i + 1])]
+        })
+    return {
+        "type": "flex", "altText": "體育AI分析系統｜功能選單",
+        "contents": {
+            "type": "bubble", "size": "mega",
+            "header": {
+                "type": "box", "layout": "vertical", "backgroundColor": "#0F172A",
+                "paddingAll": "22px", "spacing": "md",
+                "contents": [
+                    {"type": "text", "text": "SPORTS  /  DATA", "size": "xs",
+                     "color": "#93C5FD", "weight": "bold"},
+                    {"type": "text", "text": "體育 AI 分析系統", "size": "xl",
+                     "weight": "bold", "color": "#FFFFFF"},
+                    {"type": "text", "text": "掌握賽況 · 探索數據", "size": "sm",
+                     "color": "#CBD5E1"}
+                ]
+            },
+            "body": {
+                "type": "box", "layout": "vertical", "paddingAll": "18px",
+                "spacing": "md",
+                "contents": [
+                    {"type": "text", "text": "選擇你想查看的功能", "size": "sm",
+                     "weight": "bold", "color": "#334155"},
+                    *rows,
+                    {"type": "separator", "margin": "md", "color": "#E2E8F0"},
+                    {"type": "text", "text": "賽事資訊可能延遲｜分析不代表預測",
+                     "size": "xxs", "color": "#64748B", "wrap": True}
+                ]
+            }
+        }
+    }
+
 async def get_events(client, league, date):
     url = f"https://site.api.espn.com/apis/site/v2/sports/{league}/scoreboard"
     response = await client.get(url, params={"dates": date}, timeout=9)
@@ -145,7 +198,7 @@ async def webhook(request: Request, x_line_signature: str | None = Header(defaul
                     "https://api.line.me/v2/bot/message/reply",
                     headers={"Authorization": f"Bearer {token}"},
                     json={"replyToken": reply_token, "messages": [
-                        {"type": "text", "text": message, "quickReply": quick_replies()}
+                        menu_card() if message == MENU else {"type": "text", "text": message, "quickReply": quick_replies()}
                     ]},
                 )
                 result.raise_for_status()
