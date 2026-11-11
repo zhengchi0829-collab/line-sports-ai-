@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 
-app = FastAPI(title="體育AI分析系統", version="0.3.6")
+app = FastAPI(title="體育AI分析系統", version="0.3.8")
 log = logging.getLogger("sports_bot")
 TZ = ZoneInfo("Asia/Taipei")
 MENU = ("歡迎使用【體育AI分析系統】！\n\n"
@@ -200,8 +200,38 @@ def estimate_match(teams):
     n2 = teams[1].get("team", {}).get("shortDisplayName", "隊伍二")
     return f"戰績基準估算：{n1} {p:.0%}｜{n2} {1-p:.0%}（樣本 {a[1]}/{b[1]} 場）"
 
+async def mlb_next_game(now):
+    """Show next scheduled MLB game and teams in Taiwan time."""
+    async with httpx.AsyncClient() as client:
+        r = await client.get("https://statsapi.mlb.com/api/v1/schedule",
+            params={"sportId": 1, "startDate": now.strftime("%Y-%m-%d"),
+                    "endDate": (now + timedelta(days=180)).strftime("%Y-%m-%d")}, timeout=4)
+        r.raise_for_status()
+        games = [g for d in r.json().get("dates", []) for g in d.get("games", [])]
+        upcoming = []
+        for game in games:
+            try:
+                start = datetime.fromisoformat(game["gameDate"].replace("Z", "+00:00")).astimezone(TZ)
+                if start > now and game.get("status", {}).get("abstractGameState") == "Preview":
+                    upcoming.append((start, game))
+            except (ValueError, KeyError, TypeError):
+                continue
+        if not upcoming:
+            return "【棒球】目前查不到已公布的下一場 MLB 賽程。"
+        start, game = min(upcoming, key=lambda x: x[0])
+        teams = game.get("teams", {})
+        away = teams.get("away", {}).get("team", {}).get("name", "客隊")
+        home = teams.get("home", {}).get("team", {}).get("name", "主隊")
+        return f"【MLB 下一場比賽】\\n台灣時間：{start:%Y/%m/%d %H:%M}\\n{away} vs {home}\\n資料來源：MLB 官方賽程"
+
 async def sports_report(sport, analysis=False, future=False):
     now = datetime.now(TZ)
+    if sport == "棒球":
+        try:
+            return await mlb_next_game(now)
+        except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+            log.warning("MLB next game unavailable: %s", str(exc)[:120])
+            return "【棒球】MLB 官方賽程暫時無法連線，請稍後再試。"
     date = (now + timedelta(days=1)).strftime("%Y%m%d") if future else now.strftime("%Y%m%d")
     leagues = SPORTS.get(sport, [])
     lines = [f"【{sport}{'賽事分析' if analysis else '賽事'}】{now:%Y/%m/%d}（台灣時間）"]
@@ -275,7 +305,7 @@ async def reply_for(text):
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "line-sports-ai", "version": "0.3.6"}
+    return {"status": "ok", "service": "line-sports-ai", "version": "0.3.8"}
 
 @app.post("/webhooks/line")
 async def webhook(request: Request, x_line_signature: str | None = Header(default=None)):
