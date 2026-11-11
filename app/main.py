@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 
-app = FastAPI(title="體育AI分析系統", version="0.3.8")
+app = FastAPI(title="體育AI分析系統", version="0.3.9")
 log = logging.getLogger("sports_bot")
 TZ = ZoneInfo("Asia/Taipei")
 MENU = ("歡迎使用【體育AI分析系統】！\n\n"
@@ -17,7 +17,7 @@ MENU = ("歡迎使用【體育AI分析系統】！\n\n"
         "今日賽事｜足球｜籃球｜棒球｜賽事分析｜會員中心")
 BUTTONS = ["今日賽事", "未來賽事", "足球", "籃球", "棒球", "賽事分析", "會員中心", "選單"]
 SPORTS = {
-    "足球": [("英超", "soccer/eng.1"), ("西甲", "soccer/esp.1"), ("歐冠", "soccer/uefa.champions")],
+    "足球": [("英超", "soccer/eng.1"), ("西甲", "soccer/esp.1"), ("歐冠", "soccer/uefa.champions"), ("國際足球", "soccer/fifa.friendly"), ("德甲", "soccer/ger.1"), ("義甲", "soccer/ita.1")],
     "籃球": [("NBA", "basketball/nba")],
     "棒球": [("MLB", "baseball/mlb")],
 }
@@ -133,31 +133,9 @@ async def get_events(client, league, date):
             return events
     except (httpx.HTTPError, ValueError) as exc:
         log.warning("ESPN %s unavailable: %s", league, str(exc)[:140])
-    # TheSportsDB free endpoint uses YYYY-MM-DD and returns a different schema.
-    sport = "Soccer" if league.startswith("soccer/") else ("Basketball" if "basketball/" in league else "Baseball")
-    day = f"{date[:4]}-{date[4:6]}-{date[6:]}"
-    response = await client.get(
-        "https://www.thesportsdb.com/api/v1/json/123/eventsday.php",
-        params={"d": day, "s": sport}, timeout=3)
-    response.raise_for_status()
-    raw = response.json().get("events") or []
-    keyword = {"soccer/eng.1": "English Premier League",
-               "soccer/esp.1": "Spanish La Liga",
-               "soccer/uefa.champions": "Champions League",
-               "basketball/nba": "NBA", "baseball/mlb": "MLB"}.get(league, "")
-    matches = [e for e in raw if keyword.lower() in (e.get("strLeague") or "").lower()]
-    events = []
-    for e in matches:
-        home, away = e.get("strHomeTeam"), e.get("strAwayTeam")
-        if not home or not away:
-            continue
-        played = e.get("intHomeScore") is not None and e.get("intAwayScore") is not None
-        events.append({"competitions": [{"competitors": [
-            {"team": {"displayName": home, "shortDisplayName": home}, "score": str(e.get("intHomeScore") or "-")},
-            {"team": {"displayName": away, "shortDisplayName": away}, "score": str(e.get("intAwayScore") or "-")}
-        ]}], "status": {"type": {"state": "post" if played else "pre",
-              "shortDetail": e.get("strStatus") or e.get("strTime") or "賽程待確認"}}})
-    return events
+    # TheSportsDB is rate limited (429) on the free Render instance.
+    # Do not hammer it or misreport a failed request as a day without games.
+    raise httpx.HTTPStatusError("ESPN unavailable; no verified football fallback", request=httpx.Request("GET", url), response=httpx.Response(503, request=httpx.Request("GET", url)))
 
 def event_line(event):
     competition = (event.get("competitions") or [{}])[0]
@@ -274,7 +252,9 @@ async def sports_report(sport, analysis=False, future=False):
                     competitors = (event.get("competitions") or [{}])[0].get("competitors") or []
                     lines.append(estimate_match(competitors))
     if not total:
-        return f"【{sport}】目前沒有可取得的近期賽事資料。可稍後再試，或輸入「選單」。"
+        if errors:
+            return f"【{sport}】賽事資料來源目前連線失敗，無法確認下一場比賽；不是沒有賽事。"
+        return f"【{sport}】查詢日期內沒有已收錄比賽；下一場賽程尚待資料來源確認。"
     if analysis:
         lines.append("\n【數據說明】以上為公開戰績與簡易統計估算，並非訓練完成的 AI 模型預測，也不保證比賽結果。")
     else:
@@ -305,7 +285,7 @@ async def reply_for(text):
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "line-sports-ai", "version": "0.3.8"}
+    return {"status": "ok", "service": "line-sports-ai", "version": "0.3.9"}
 
 @app.post("/webhooks/line")
 async def webhook(request: Request, x_line_signature: str | None = Header(default=None)):
