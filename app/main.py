@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 
-app = FastAPI(title="體育AI分析系統", version="0.6.12")
+app = FastAPI(title="體育AI分析系統", version="0.6.13")
 log = logging.getLogger("sports_bot")
 TZ = ZoneInfo("Asia/Taipei")
 MENU = ("歡迎使用【體育AI分析系統】！\n\n"
@@ -355,8 +355,8 @@ def offline_analysis(sport, matchup=None, team_history=None, star_players=None):
         total = "小 220.5 分" if pick % 3 else "大 220.5 分"
     else:
         total = "小 8.5 分" if pick % 3 else "大 8.5 分"
-    focus = team_history or f"{winner}：近期歷史戰績暫無可驗證資料"
-    result = star_players or f"{winner}：主力球員名單暫時無法取得"
+    focus = team_history
+    result = star_players
     accent = {"足球": "#0D9488", "籃球": "#EA580C", "棒球": "#6366F1"}[sport]
     def txt(value, size="sm", color="#334155", weight="regular"):
         return {"type": "text", "text": value, "size": size, "color": color, "weight": weight, "wrap": True}
@@ -373,8 +373,8 @@ def offline_analysis(sport, matchup=None, team_history=None, star_players=None):
                         txt(f"{sport} · 對戰情境分析", "xs", "#CBD5E1")]},
                 "body": {"type": "box", "layout": "vertical", "backgroundColor": "#FFFFFF",
                     "paddingAll": "12px", "spacing": "sm", "contents": [
-                        panel("📊 推薦隊伍｜近期戰績", focus),
-                        panel("⭐ 推薦隊伍｜主力球員", result),
+                        *([panel("📊 推薦隊伍｜近期戰績", focus)] if focus else []),
+                        *([panel("⭐ 推薦隊伍｜球員名單", result)] if result else []),
                         {"type": "box", "layout": "vertical", "backgroundColor": "#0F172A",
                          "cornerRadius": "12px", "paddingAll": "13px", "spacing": "sm",
                          "contents": [
@@ -529,65 +529,119 @@ async def upcoming_match_cards(sport):
 
 
 async def winner_team_details(sport, home, away):
-    """Best-effort factual team results and roster; no invented player names."""
+    """Retrieve verified recent results and roster for the recommended team."""
+    import asyncio
     import difflib
     winner_hash = int(hashlib.sha256((sport + "|" + home + "|" + away).encode()).hexdigest()[:8], 16)
     winner = home if winner_hash % 2 == 0 else away
     league = {"足球": "soccer/ger.1", "籃球": "basketball/nba", "棒球": "baseball/mlb"}[sport]
     base = "https://site.api.espn.com/apis/site/v2/sports/" + league
     history, players = None, None
+    reverse_names = [k for k, v in TEAM_ZH.items() if v == winner]
+    aliases = [winner, *reverse_names]
+    if sport == "足球":
+        aliases += [winner.replace("科隆", "Cologne"), winner.replace("科隆", "Koln")]
+    def similarity(team):
+        names = [team.get("displayName", ""), team.get("name", ""),
+                 team.get("shortDisplayName", ""), team.get("abbreviation", "")]
+        names += [team_zh(n) for n in names]
+        return max((difflib.SequenceMatcher(None, str(a).casefold(), str(n).casefold()).ratio()
+                    for a in aliases for n in names if n), default=0)
     try:
-        async with httpx.AsyncClient(timeout=2.3) as client:
-            teams_resp = await client.get(base + "/teams")
-            teams_resp.raise_for_status()
-            raw_teams = teams_resp.json().get("sports", [{}])[0].get("leagues", [{}])[0].get("teams", [])
-            candidates = [entry.get("team", {}) for entry in raw_teams]
-            def score(team):
-                name = team.get("displayName", "")
-                short = team.get("name", "")
-                names = [name, short, team_zh(name), team_zh(short)]
-                return max(difflib.SequenceMatcher(None, winner.casefold(), str(n).casefold()).ratio() for n in names)
-            if not candidates:
-                return None, None
-            team = max(candidates, key=score)
-            if score(team) < 0.52:
-                return None, None
-            team_id = team.get("id")
-            if not team_id:
-                return None, None
-            import asyncio
-            roster_resp, schedule_resp = await asyncio.gather(
-                client.get(base + "/teams/" + str(team_id) + "/roster"),
-                client.get(base + "/teams/" + str(team_id) + "/schedule"),
-                return_exceptions=True)
-            if isinstance(roster_resp, httpx.Response) and roster_resp.status_code == 200:
-                roster = roster_resp.json()
-                athletes = roster.get("athletes", [])
-                if athletes and isinstance(athletes[0], dict) and "items" in athletes[0]:
-                    athletes = [a for group in athletes for a in group.get("items", [])]
-                names = [a.get("displayName") or a.get("fullName") for a in athletes if isinstance(a, dict)]
-                names = [n for n in names if n]
-                if names:
-                    players = f"{winner}｜現役名單：{'、'.join(names[:3])}（非依表現排名）"
-            if isinstance(schedule_resp, httpx.Response) and schedule_resp.status_code == 200:
-                events = schedule_resp.json().get("events", [])
-                completed = [e for e in events if e.get("competitions", [{}])[0].get("status", {}).get("type", {}).get("completed") or e.get("status", {}).get("type", {}).get("completed")]
-                completed = sorted(completed, key=lambda e: e.get("date", ""), reverse=True)[:5]
-                wins = losses = draws = 0
-                for event in completed:
-                    competitors = event.get("competitions", [{}])[0].get("competitors", [])
-                    mine = next((c for c in competitors if str(c.get("team", {}).get("id")) == str(team_id)), None)
-                    if mine:
-                        if mine.get("winner") is True:
-                            wins += 1
-                        elif any(c.get("winner") is True for c in competitors):
-                            losses += 1
-                        else:
-                            draws += 1
-                if wins + losses + draws:
-                    history = f"{winner}｜最近 {wins + losses + draws} 場：{wins} 勝、{draws} 和、{losses} 敗（ESPN 賽程）"
+        async with httpx.AsyncClient(timeout=4.0, follow_redirects=True) as client:
+            tasks = [client.get(base + "/teams", params={"limit": 100})]
+            if sport == "足球":
+                season = datetime.now(TZ).year
+                tasks += [client.get("https://api.openligadb.de/getmatchdata/bl1/" + str(y))
+                          for y in (season - 1, season)]
+            responses = await asyncio.gather(*tasks, return_exceptions=True)
+            teams_resp = responses[0]
+            if isinstance(teams_resp, httpx.Response) and teams_resp.status_code == 200:
+                raw = teams_resp.json().get("sports", [{}])[0].get("leagues", [{}])[0].get("teams", [])
+                candidates = [e.get("team", {}) for e in raw]
+                if candidates:
+                    team = max(candidates, key=similarity)
+                    if similarity(team) >= 0.64 and team.get("id"):
+                        team_id = str(team["id"])
+                        roster_resp, schedule_resp = await asyncio.gather(
+                            client.get(base + "/teams/" + team_id + "/roster"),
+                            client.get(base + "/teams/" + team_id + "/schedule"),
+                            return_exceptions=True)
+                        if isinstance(roster_resp, httpx.Response) and roster_resp.status_code == 200:
+                            roster = roster_resp.json()
+                            athletes = roster.get("athletes", [])
+                            if isinstance(athletes, dict):
+                                athletes = list(athletes.values())
+                            flat = []
+                            for entry in athletes:
+                                if not isinstance(entry, dict):
+                                    continue
+                                if "items" in entry:
+                                    flat.extend(entry["items"])
+                                else:
+                                    flat.append(entry)
+                            names = [p.get("displayName") or p.get("fullName") for p in flat if isinstance(p, dict)]
+                            names = list(dict.fromkeys(n for n in names if n))
+                            if names:
+                                players = winner + "｜球員名單：" + "、".join(names[:3])
+                        if isinstance(schedule_resp, httpx.Response) and schedule_resp.status_code == 200:
+                            events = schedule_resp.json().get("events", [])
+                            finished = []
+                            for event in events:
+                                competitions = event.get("competitions") or []
+                                if not competitions:
+                                    continue
+                                comp = competitions[0]
+                                status = comp.get("status", event.get("status", {}))
+                                if not status.get("type", {}).get("completed"):
+                                    continue
+                                mine = next((c for c in comp.get("competitors", [])
+                                             if str(c.get("team", {}).get("id")) == team_id), None)
+                                if mine:
+                                    finished.append((event.get("date", ""), mine, comp.get("competitors", [])))
+                            finished.sort(key=lambda x: x[0], reverse=True)
+                            wins = losses = draws = 0
+                            for _, mine, competitors in finished[:5]:
+                                if mine.get("winner") is True:
+                                    wins += 1
+                                elif any(c.get("winner") is True for c in competitors):
+                                    losses += 1
+                                else:
+                                    draws += 1
+                            if wins + losses + draws:
+                                history = f"{winner}｜近 {wins + losses + draws} 場：{wins} 勝、{draws} 和、{losses} 敗"
+            # Bundesliga backup is independent of ESPN's incomplete team directory.
+            if sport == "足球" and not history:
+                matches = []
+                for response in responses[1:]:
+                    if not isinstance(response, httpx.Response) or response.status_code != 200:
+                        continue
+                    for match in response.json():
+                        teams = [match.get("team1", {}), match.get("team2", {})]
+                        if not any(team_zh(t.get("teamName", "")) == winner or
+                                   t.get("teamName", "") in aliases for t in teams):
+                            continue
+                        if not match.get("matchIsFinished") or not match.get("matchResults"):
+                            continue
+                        results = match["matchResults"]
+                        final = next((r for r in results if r.get("resultTypeID") == 2), None)
+                        if final is None:
+                            final = next((r for r in results if r.get("resultTypeID") == 1), None)
+                        if final:
+                            mine_home = team_zh(teams[0].get("teamName", "")) == winner or teams[0].get("teamName", "") in aliases
+                            mine_score = final.get("pointsTeam1" if mine_home else "pointsTeam2")
+                            other_score = final.get("pointsTeam2" if mine_home else "pointsTeam1")
+                            if isinstance(mine_score, int) and isinstance(other_score, int):
+                                matches.append((match.get("matchDateTimeUTC", ""), mine_score, other_score))
+                matches.sort(key=lambda x: x[0], reverse=True)
+                recent = matches[:5]
+                if recent:
+                    wins = sum(x > y for _, x, y in recent)
+                    draws = sum(x == y for _, x, y in recent)
+                    losses = len(recent) - wins - draws
+                    history = f"{winner}｜近 {len(recent)} 場：{wins} 勝、{draws} 和、{losses} 敗（德甲）"
     except (httpx.HTTPError, ValueError, KeyError, TypeError, IndexError) as exc:
-        log.warning("Team details unavailable: %s", str(exc)[:120])
+        log.warning("Verified team details unavailable for %s: %s", winner, str(exc)[:150])
     return history, players
 
 
@@ -663,12 +717,12 @@ async def ensure_persistent_rich_menu():
             existing = await client.get("https://api.line.me/v2/bot/richmenu/list", headers=headers)
             existing.raise_for_status()
             for menu in existing.json().get("richmenus", []):
-                if menu.get("name") == "Sports AI Persistent Menu v0.6.12":
+                if menu.get("name") == "Sports AI Persistent Menu v0.6.13":
                     rich_id = menu["richMenuId"]
                     break
             else:
                 payload = {"size": {"width": 1200, "height": 405},
-                           "selected": True, "name": "Sports AI Persistent Menu v0.6.12",
+                           "selected": True, "name": "Sports AI Persistent Menu v0.6.13",
                            "chatBarText": "⚽ 體育賽事快捷選單", "areas": areas}
                 created = await client.post("https://api.line.me/v2/bot/richmenu",
                                             headers=headers, json=payload)
@@ -705,7 +759,7 @@ async def setup_rich_menu_on_startup():
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "line-sports-ai", "version": "0.6.12"}
+    return {"status": "ok", "service": "line-sports-ai", "version": "0.6.13"}
 
 @app.post("/webhooks/line")
 async def webhook(request: Request, x_line_signature: str | None = Header(default=None)):
