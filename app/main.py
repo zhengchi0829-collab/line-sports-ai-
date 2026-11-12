@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 
-app = FastAPI(title="體育AI分析系統", version="0.6.10")
+app = FastAPI(title="體育AI分析系統", version="0.6.11")
 log = logging.getLogger("sports_bot")
 TZ = ZoneInfo("Asia/Taipei")
 MENU = ("歡迎使用【體育AI分析系統】！\n\n"
@@ -560,52 +560,60 @@ async def ensure_persistent_rich_menu():
     from PIL import Image, ImageDraw, ImageFont
     from fastapi.concurrency import run_in_threadpool
 
-    def render_menu():
-        image = Image.new("RGB", (1200, 810), "#0B1220")
+    def render_menu(font_data=None):
+        image = Image.new("RGB", (1200, 405), "#0B1220")
         draw = ImageDraw.Draw(image)
         try:
-            font = ImageFont.truetype("DejaVuSans-Bold.ttf", 51)
-            small = ImageFont.truetype("DejaVuSans.ttf", 24)
-        except OSError:
-            font = ImageFont.load_default()
-            small = font
-        tiles = [("SOCCER", "#0F766E"), ("BASKETBALL", "#C2410C"),
-                 ("BASEBALL", "#4F46E5"), ("TODAY", "#1D4ED8"),
-                 ("UPCOMING", "#334155"), ("MENU", "#334155")]
+            font = ImageFont.truetype(io.BytesIO(font_data), 43) if font_data else ImageFont.truetype("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", 43)
+        except (OSError, ValueError):
+            font = ImageFont.truetype("DejaVuSans-Bold.ttf", 40)
+        tiles = [("足球", "#0F766E"), ("籃球", "#C2410C"),
+                 ("棒球", "#4F46E5"), ("今日賽事", "#1D4ED8"),
+                 ("未來賽事", "#334155"), ("主選單", "#334155")]
         for index, (label, color) in enumerate(tiles):
-            x = (index % 3) * 400
-            y = (index // 3) * 405
-            draw.rounded_rectangle((x + 10, y + 10, x + 390, y + 395), radius=26, fill=color)
+            x, y = (index % 3) * 400, (index // 3) * 202
+            draw.rounded_rectangle((x + 7, y + 6, x + 393, y + 196), radius=18, fill=color)
             bbox = draw.textbbox((0, 0), label, font=font)
-            draw.text((x + (400 - (bbox[2] - bbox[0])) / 2, y + 175),
+            draw.text((x + (400 - (bbox[2] - bbox[0])) / 2,
+                       y + (202 - (bbox[3] - bbox[1])) / 2 - bbox[1]),
                       label, font=font, fill="white")
         out = io.BytesIO()
         image.save(out, format="PNG")
         return out.getvalue()
 
     labels = ["足球", "籃球", "棒球", "今日賽事", "未來賽事", "選單"]
-    areas = [{"bounds": {"x": (i % 3) * 400, "y": (i // 3) * 405,
-                         "width": 400, "height": 405},
+    areas = [{"bounds": {"x": (i % 3) * 400, "y": (i // 3) * 202,
+                         "width": 400, "height": 202 if i < 3 else 203},
               "action": {"type": "message", "label": label, "text": label}}
              for i, label in enumerate(labels)]
+
     headers = {"Authorization": f"Bearer {token}"}
     async with httpx.AsyncClient(timeout=15) as client:
         try:
             existing = await client.get("https://api.line.me/v2/bot/richmenu/list", headers=headers)
             existing.raise_for_status()
             for menu in existing.json().get("richmenus", []):
-                if menu.get("name") == "Sports AI Persistent Menu v0.6.10":
+                if menu.get("name") == "Sports AI Persistent Menu v0.6.11":
                     rich_id = menu["richMenuId"]
                     break
             else:
-                payload = {"size": {"width": 1200, "height": 810},
-                           "selected": True, "name": "Sports AI Persistent Menu v0.6.10",
+                payload = {"size": {"width": 1200, "height": 405},
+                           "selected": True, "name": "Sports AI Persistent Menu v0.6.11",
                            "chatBarText": "⚽ 體育賽事快捷選單", "areas": areas}
                 created = await client.post("https://api.line.me/v2/bot/richmenu",
                                             headers=headers, json=payload)
                 created.raise_for_status()
                 rich_id = created.json()["richMenuId"]
-                png = await run_in_threadpool(render_menu)
+                font_data = None
+                try:
+                    font_response = await client.get(
+                        "https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/OTF/TraditionalChinese/NotoSansCJKtc-Regular.otf",
+                        timeout=45)
+                    font_response.raise_for_status()
+                    font_data = font_response.content
+                except httpx.HTTPError as font_exc:
+                    log.warning("Chinese menu font download failed: %s", str(font_exc)[:120])
+                png = await run_in_threadpool(render_menu, font_data)
                 upload = await client.post(
                     f"https://api-data.line.me/v2/bot/richmenu/{rich_id}/content",
                     headers={**headers, "Content-Type": "image/png"}, content=png)
@@ -627,7 +635,7 @@ async def setup_rich_menu_on_startup():
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "line-sports-ai", "version": "0.6.10"}
+    return {"status": "ok", "service": "line-sports-ai", "version": "0.6.11"}
 
 @app.post("/webhooks/line")
 async def webhook(request: Request, x_line_signature: str | None = Header(default=None)):
