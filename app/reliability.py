@@ -18,10 +18,11 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.6.26"
+VERSION = "0.6.27"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
-KEYS = {v: k for k, v in SPORTS.items()}\nKEYS.update({"NBA": "basketball", "MLB": "baseball"})
+KEYS = {v: k for k, v in SPORTS.items()}
+KEYS.update({"NBA": "basketball", "MLB": "baseball"})
 DEMO_PAIRS = {
     "soccer": ("\u62dc\u4ec1\u6155\u5c3c\u9ed1", "\u591a\u7279\u8499\u5fb7"),
     "basketball": ("\u6d1b\u6749\u78ef\u6e56\u4eba", "\u91d1\u5dde\u52c7\u58eb"),
