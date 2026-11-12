@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 
-app = FastAPI(title="體育AI分析系統", version="0.6.13")
+app = FastAPI(title="體育AI分析系統", version="0.6.14")
 log = logging.getLogger("sports_bot")
 TZ = ZoneInfo("Asia/Taipei")
 MENU = ("歡迎使用【體育AI分析系統】！\n\n"
@@ -355,8 +355,23 @@ def offline_analysis(sport, matchup=None, team_history=None, star_players=None):
         total = "小 220.5 分" if pick % 3 else "大 220.5 分"
     else:
         total = "小 8.5 分" if pick % 3 else "大 8.5 分"
-    focus = team_history
-    result = star_players
+    # Always show both sections. Distinguish verified facts from scouting criteria.
+    if team_history:
+        focus = team_history
+    elif sport == "足球":
+        focus = f"{winner}｜歷史戰績尚未核實；本場可留意控球、射門及近期攻守表現。"
+    elif sport == "籃球":
+        focus = f"{winner}｜歷史戰績尚未核實；本場可留意近況、進攻效率與籃板。"
+    else:
+        focus = f"{winner}｜歷史戰績尚未核實；本場可留意近期勝敗、先發投手與牛棚。"
+    if star_players:
+        result = star_players
+    elif sport == "足球":
+        result = f"{winner}｜主力名單尚未核實；重點觀察先發前鋒、中場核心與門將。"
+    elif sport == "籃球":
+        result = f"{winner}｜主力名單尚未核實；重點觀察先發控衛、得分主力與中鋒。"
+    else:
+        result = f"{winner}｜主力名單尚未核實；重點觀察先發投手、中心打者與終結者。"
     accent = {"足球": "#0D9488", "籃球": "#EA580C", "棒球": "#6366F1"}[sport]
     def txt(value, size="sm", color="#334155", weight="regular"):
         return {"type": "text", "text": value, "size": size, "color": color, "weight": weight, "wrap": True}
@@ -373,8 +388,8 @@ def offline_analysis(sport, matchup=None, team_history=None, star_players=None):
                         txt(f"{sport} · 對戰情境分析", "xs", "#CBD5E1")]},
                 "body": {"type": "box", "layout": "vertical", "backgroundColor": "#FFFFFF",
                     "paddingAll": "12px", "spacing": "sm", "contents": [
-                        *([panel("📊 推薦隊伍｜近期戰績", focus)] if focus else []),
-                        *([panel("⭐ 推薦隊伍｜球員名單", result)] if result else []),
+                        panel("📊 分析重點｜推薦隊伍戰績", focus),
+                        panel("⭐ 球員關鍵看點｜推薦隊伍", result),
                         {"type": "box", "layout": "vertical", "backgroundColor": "#0F172A",
                          "cornerRadius": "12px", "paddingAll": "13px", "spacing": "sm",
                          "contents": [
@@ -717,12 +732,12 @@ async def ensure_persistent_rich_menu():
             existing = await client.get("https://api.line.me/v2/bot/richmenu/list", headers=headers)
             existing.raise_for_status()
             for menu in existing.json().get("richmenus", []):
-                if menu.get("name") == "Sports AI Persistent Menu v0.6.13":
+                if menu.get("name") == "Sports AI Persistent Menu v0.6.14":
                     rich_id = menu["richMenuId"]
                     break
             else:
                 payload = {"size": {"width": 1200, "height": 405},
-                           "selected": True, "name": "Sports AI Persistent Menu v0.6.13",
+                           "selected": True, "name": "Sports AI Persistent Menu v0.6.14",
                            "chatBarText": "⚽ 體育賽事快捷選單", "areas": areas}
                 created = await client.post("https://api.line.me/v2/bot/richmenu",
                                             headers=headers, json=payload)
@@ -759,7 +774,7 @@ async def setup_rich_menu_on_startup():
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "line-sports-ai", "version": "0.6.13"}
+    return {"status": "ok", "service": "line-sports-ai", "version": "0.6.14"}
 
 @app.post("/webhooks/line")
 async def webhook(request: Request, x_line_signature: str | None = Header(default=None)):
