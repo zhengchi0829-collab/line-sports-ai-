@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.6.31"
+VERSION = "0.6.32"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -359,7 +359,7 @@ def fixture_cards(sport: str, snapshot: Snapshot, team_name, today=False, now=No
                      (" | \u5feb\u53d6\u8cc7\u6599" if snapshot.stale else ""), "xxs", "#64748B")]},
             "footer": {"type": "box", "layout": "vertical", "paddingAll": "10px", "contents": [
                 button("\u7acb\u5373\u5206\u6790", f"\u5206\u6790{basketball_league_label(sport)} {home} vs {away}" if sport.startswith("basketball") else f"\u5206\u6790{SPORTS[sport]} {home} vs {away}", accent)]}})
-    return {"type": "flex", "altText": SPORTS[sport] + "\u8fd1\u671f\u8cfd\u4e8b\uff5c\u9ede\u9078\u5206\u6790",
+    return {"type": "flex", "altText": (basketball_league_label(sport) if sport.startswith("basketball") else SPORTS[sport]) + "\u8fd1\u671f\u8cfd\u4e8b\uff5c\u9ede\u9078\u5206\u6790",
             "quickReply": quick_menu(), "contents": {"type": "carousel", "contents": bubbles}}
 
 
