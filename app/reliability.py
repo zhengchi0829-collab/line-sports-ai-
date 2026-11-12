@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.6.33"
+VERSION = "0.6.34"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -297,6 +297,25 @@ def league_menu() -> dict:
                          ]}}}
 
 
+def baseball_menu() -> dict:
+    """Second-level league chooser opened from the baseball button."""
+    return {"type": "flex", "altText": "選擇 MLB、NPB、KBO、CPBL 或 MiLB", "quickReply": quick_menu(),
+            "contents": {"type": "bubble", "size": "kilo",
+                "header": {"type": "box", "layout": "vertical", "backgroundColor": "#0F172A",
+                           "paddingAll": "16px", "contents": [
+                               text("⚾ 棒球入口", "lg", "#FFFFFF", "bold"),
+                               text("選擇要查看的聯盟", "sm", "#CBD5E1")]},
+                "body": {"type": "box", "layout": "vertical", "spacing": "sm", "paddingAll": "14px",
+                         "contents": [
+                             button("⚾ MLB｜美國職棒", "MLB", "#7C3AED"),
+                             button("⚾ NPB｜日本職棒", "NPB", "#B91C1C"),
+                             button("⚾ KBO｜韓國職棒", "KBO", "#0369A1"),
+                             button("⚾ CPBL｜中華職棒", "CPBL", "#047857"),
+                             button("⚾ MiLB｜美國小聯盟", "MiLB", "#92400E"),
+                             button("🏠 回主選單", MENU, "#334155")
+                         ]}}}
+
+
 def notice(sport: str, snapshot: Snapshot) -> dict:
     name = SPORTS.get(sport, "\u8cfd\u4e8b")
     failed = bool(snapshot.errors)
@@ -364,6 +383,20 @@ def fixture_cards(sport: str, snapshot: Snapshot, team_name, today=False, now=No
 
 
 class Controller:
+    def baseball_league_entry(self, league: str, zh: str) -> dict:
+        return {"type": "flex", "altText": f"{league}｜{zh} 對戰分析", "quickReply": quick_menu(),
+                "contents": {"type": "bubble", "size": "kilo",
+                    "header": {"type": "box", "layout": "vertical", "backgroundColor": "#0F172A",
+                               "paddingAll": "16px", "contents": [
+                                   text(f"⚾ {league}", "lg", "#FFFFFF", "bold"),
+                                   text(zh, "sm", "#CBD5E1")]},
+                    "body": {"type": "box", "layout": "vertical", "spacing": "sm", "paddingAll": "14px",
+                             "contents": [
+                                 text(f"輸入：分析{league} A隊 vs B隊", "sm"),
+                                 text("系統會使用棒球分析模型產生對戰重點與模擬推薦方向。", "xs", "#64748B"),
+                                 button("🏠 回棒球選單", "棒球", "#334155")
+                             ]}}}
+
     def tpbl_analysis_entry(self) -> dict:
         return {"type": "flex", "altText": "TPBL 台灣職業籃球大聯盟｜對戰分析", "quickReply": quick_menu(),
                 "contents": {"type": "bubble", "size": "kilo",
@@ -419,6 +452,16 @@ class Controller:
         compact = re.sub(r"\s+", "", raw)
         if compact == "籃球":
             return [league_menu()]
+        if compact == "棒球":
+            return [baseball_menu()]
+        if compact == "NPB":
+            return [self.baseball_league_entry("NPB", "日本職業棒球")]
+        if compact == "KBO":
+            return [self.baseball_league_entry("KBO", "韓國職業棒球")]
+        if compact == "CPBL":
+            return [self.baseball_league_entry("CPBL", "中華職業棒球大聯盟")]
+        if compact == "MiLB":
+            return [self.baseball_league_entry("MiLB", "美國職棒小聯盟")]
         if compact == "TPBL":
             return [self.tpbl_analysis_entry()]
         if compact in KEYS:
@@ -428,21 +471,28 @@ class Controller:
             snapshots = await asyncio.gather(*(self.fixtures.get(key) for key in SPORTS), return_exceptions=True)
             return [fixture_cards(key, snap if isinstance(snap, Snapshot) else Snapshot(errors=["internal_error"]),
                                   self.ui.team_zh, today=compact == TODAY) for key, snap in zip(SPORTS, snapshots)]
-        match = re.match(r"^\s*分析\s*(足球|籃球|棒球|NBA|NCAA|NBL|TPBL)\s*(.*)$", raw, re.S)
+        match = re.match(r"^\s*分析\s*(足球|籃球|棒球|NBA|NCAA|NBL|TPBL|MLB|NPB|KBO|CPBL|MiLB)\s*(.*)$", raw, re.S)
         if match:
             sport, matchup = match.groups()
-            league = sport if sport in ("NBA", "NCAA", "NBL", "TPBL") else None
-            base_sport = "籃球" if league else sport
+            basketball_league = sport if sport in ("NBA", "NCAA", "NBL", "TPBL") else None
+            baseball_league = sport if sport in ("MLB", "NPB", "KBO", "CPBL", "MiLB") else None
+            league = basketball_league or baseball_league
+            base_sport = "籃球" if basketball_league else ("棒球" if baseball_league else sport)
             if not matchup:
                 if league == "TPBL":
                     return [self.tpbl_analysis_entry()]
-                key = {"NBA": "basketball", "NCAA": "basketball_ncaa", "NBL": "basketball_nbl"}.get(league) if league else KEYS[sport]
+                if league in ("NPB", "KBO", "CPBL", "MiLB"):
+                    names = {"NPB": "日本職業棒球", "KBO": "韓國職業棒球",
+                             "CPBL": "中華職業棒球大聯盟", "MiLB": "美國職棒小聯盟"}
+                    return [self.baseball_league_entry(league, names[league])]
+                key = {"NBA": "basketball", "NCAA": "basketball_ncaa", "NBL": "basketball_nbl",
+                       "MLB": "baseball"}.get(league) if league else KEYS[sport]
                 return [fixture_cards(key, await self.fixtures.get(key), self.ui.team_zh)]
             parts = re.split(r"\s*(?:\bvs\.?\b|\u5c0d\u6230|\u5c0d|\uff0d|\u2014)\s*", matchup, maxsplit=1, flags=re.I)
             if len(parts) == 2 and all(p.strip() for p in parts):
                 a, b = (p.strip().lstrip(".").strip()[:35] for p in parts)
                 history, players = (None, None) if demo else await self.team_details(base_sport, a, b)
-                card = self.ui.offline_analysis(base_sport, a + " vs " + b, history, players, league=league)
+                card = self.ui.offline_analysis(base_sport, a + " vs " + b, history, players, league=(basketball_league or baseball_league))
                 if isinstance(card, dict):
                     if league:
                         card["contents"]["header"]["contents"][-1]["text"] = f"{league} · 對戰情境分析"
