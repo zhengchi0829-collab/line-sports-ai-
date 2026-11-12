@@ -18,11 +18,11 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.6.27"
+VERSION = "0.6.28"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
-KEYS.update({"NBA": "basketball", "MLB": "baseball"})
+KEYS.update({"NBA": "basketball", "NCAA": "basketball_ncaa", "NBL": "basketball_nbl", "MLB": "baseball"})
 DEMO_PAIRS = {
     "soccer": ("\u62dc\u4ec1\u6155\u5c3c\u9ed1", "\u591a\u7279\u8499\u5fb7"),
     "basketball": ("\u6d1b\u6749\u78ef\u6e56\u4eba", "\u91d1\u5dde\u52c7\u58eb"),
@@ -184,11 +184,23 @@ class Fixtures:
         if sport == "basketball":
             return [
                 ("nba_schedule", "https://cdn.nba.com/static/json/staticData/scheduleLeagueV2_1.json", {}, "nba_schedule"),
-                # The scoreboard date-range query returns HTTP 400 for this feed.
-                # Query separate valid calendar dates; never retry a 403 with a proxy.
                 ("nba_espn_today", "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard",
                  {"dates": now.strftime("%Y%m%d")}, "espn"),
                 ("nba_espn_next", "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard",
+                 {"dates": (now + timedelta(days=1)).strftime("%Y%m%d")}, "espn"),
+            ]
+        if sport == "basketball_ncaa":
+            return [
+                ("ncaa_today", "https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard",
+                 {"dates": now.strftime("%Y%m%d"), "groups": "50", "limit": "100"}, "espn"),
+                ("ncaa_next", "https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard",
+                 {"dates": (now + timedelta(days=1)).strftime("%Y%m%d"), "groups": "50", "limit": "100"}, "espn"),
+            ]
+        if sport == "basketball_nbl":
+            return [
+                ("nbl_today", "https://site.api.espn.com/apis/site/v2/sports/basketball/nbl/scoreboard",
+                 {"dates": now.strftime("%Y%m%d")}, "espn"),
+                ("nbl_next", "https://site.api.espn.com/apis/site/v2/sports/basketball/nbl/scoreboard",
                  {"dates": (now + timedelta(days=1)).strftime("%Y%m%d")}, "espn"),
             ]
         return [("mlb", "https://statsapi.mlb.com/api/v1/schedule",
@@ -264,12 +276,12 @@ def button(label: str, command: str, color="#0F766E") -> dict:
 
 def quick_menu() -> dict:
     return {"items": [{"type": "action", "action": {"type": "message", "label": name, "text": name}}
-                      for name in [*SPORTS.values(), "NBA", "MLB", TODAY, FUTURE, MENU]]}
+                      for name in [*SPORTS.values(), "NBA", "NCAA", "NBL", "TPBL", TODAY, FUTURE, MENU]]}
 
 
 def league_menu() -> dict:
     """Second-level league chooser opened from the basketball button."""
-    return {"type": "flex", "altText": "選擇 NBA 或 MLB", "quickReply": quick_menu(),
+    return {"type": "flex", "altText": "選擇 NBA、NCAA、NBL 或 TPBL", "quickReply": quick_menu(),
             "contents": {"type": "bubble", "size": "kilo",
                 "header": {"type": "box", "layout": "vertical", "backgroundColor": "#0F172A",
                            "paddingAll": "16px", "contents": [
@@ -278,7 +290,9 @@ def league_menu() -> dict:
                 "body": {"type": "box", "layout": "vertical", "spacing": "sm", "paddingAll": "14px",
                          "contents": [
                              button("🏀 NBA", "NBA", "#C2410C"),
-                             button("⚾ MLB（棒球）", "MLB", "#7C3AED"),
+                             button("🏀 NCAA", "NCAA", "#B45309"),
+                             button("🏀 NBL", "NBL", "#0369A1"),
+                             button("🏀 TPBL", "TPBL", "#7C3AED"),
                              button("🏠 回主選單", MENU, "#334155")
                          ]}}}
 
@@ -303,8 +317,9 @@ def fixture_cards(sport: str, snapshot: Snapshot, team_name, today=False, now=No
     now = now or datetime.now(TZ)
     games = select_games(snapshot.games, now, today)
     if not games:
-        return notice(sport, snapshot)
-    colors = {"soccer": "#0F766E", "basketball": "#C2410C", "baseball": "#4F46E5"}
+        return notice("basketball" if sport.startswith("basketball_") else sport, snapshot)
+    colors = {"soccer": "#0F766E", "basketball": "#C2410C", "basketball_ncaa": "#B45309",
+              "basketball_nbl": "#0369A1", "baseball": "#4F46E5"}
     accent = colors[sport]
     bubbles = []
     for g in games:
@@ -325,14 +340,14 @@ def fixture_cards(sport: str, snapshot: Snapshot, team_name, today=False, now=No
         stamp = snapshot.fetched.strftime("%m/%d %H:%M") if snapshot.fetched else "-"
         bubbles.append({"type": "bubble", "size": "kilo",
             "header": {"type": "box", "layout": "vertical", "backgroundColor": "#0F172A", "paddingAll": "14px",
-                       "spacing": "xs", "contents": [text(g.league + " | " + SPORTS[sport], "xs", "#CBD5E1"),
+                       "spacing": "xs", "contents": [text(g.league + " | " + ("籃球" if sport.startswith("basketball") else SPORTS[sport]), "xs", "#CBD5E1"),
                        text(label, "xl", "#FFFFFF", "bold"), text("\u53f0\u7063\u6642\u9593 | " + subtitle, "xs", "#CBD5E1")]},
             "body": {"type": "box", "layout": "vertical", "backgroundColor": "#F4F7FB", "paddingAll": "14px",
                      "spacing": "sm", "contents": [team_row(home, g.home_logo, "\u4e3b\u968a"), text("VS", color=accent, weight="bold"),
                      team_row(away, g.away_logo, "\u5ba2\u968a"), text(g.source + " | " + stamp +
                      (" | \u5feb\u53d6\u8cc7\u6599" if snapshot.stale else ""), "xxs", "#64748B")]},
             "footer": {"type": "box", "layout": "vertical", "paddingAll": "10px", "contents": [
-                button("\u7acb\u5373\u5206\u6790", f"\u5206\u6790{SPORTS[sport]} {home} vs {away}", accent)]}})
+                button("\u7acb\u5373\u5206\u6790", f"\u5206\u6790籃球 {home} vs {away}" if sport.startswith("basketball") else f"\u5206\u6790{SPORTS[sport]} {home} vs {away}", accent)]}})
     return {"type": "flex", "altText": SPORTS[sport] + "\u8fd1\u671f\u8cfd\u4e8b\uff5c\u9ede\u9078\u5206\u6790",
             "quickReply": quick_menu(), "contents": {"type": "carousel", "contents": bubbles}}
 
@@ -376,6 +391,21 @@ class Controller:
         compact = re.sub(r"\s+", "", raw)
         if compact == "籃球":
             return [league_menu()]
+        if compact == "TPBL":
+            return [{"type": "flex", "altText": "TPBL 台灣職業籃球大聯盟", "quickReply": quick_menu(),
+                     "contents": {"type": "bubble", "size": "kilo",
+                         "header": {"type": "box", "layout": "vertical", "backgroundColor": "#4C1D95",
+                                    "paddingAll": "16px", "contents": [
+                                        text("🏀 TPBL", "lg", "#FFFFFF", "bold"),
+                                        text("台灣職業籃球大聯盟", "sm", "#E9D5FF")]},
+                         "body": {"type": "box", "layout": "vertical", "spacing": "sm", "paddingAll": "14px",
+                                  "contents": [
+                                      text("TPBL 已加入籃球入口。官方賽程資料源尚未接入即時卡片。", "sm"),
+                                      {"type": "button", "style": "primary", "height": "sm", "color": "#7C3AED",
+                                       "action": {"type": "uri", "label": "查看 TPBL 官方賽程",
+                                                  "uri": "https://tpbl.basketball/schedule"}},
+                                      button("🏠 回籃球選單", "籃球", "#334155")
+                                  ]}}}]
         if compact in KEYS:
             key = KEYS[compact]
             return [fixture_cards(key, await self.fixtures.get(key), self.ui.team_zh)]
