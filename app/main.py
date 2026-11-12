@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 
-app = FastAPI(title="體育AI分析系統", version="0.6.11")
+app = FastAPI(title="體育AI分析系統", version="0.6.12")
 log = logging.getLogger("sports_bot")
 TZ = ZoneInfo("Asia/Taipei")
 MENU = ("歡迎使用【體育AI分析系統】！\n\n"
@@ -320,7 +320,7 @@ async def sports_report(sport, analysis=False, future=False):
     result = "\n".join(lines)
     return result[:4800]
 
-def offline_analysis(sport, matchup=None):
+def offline_analysis(sport, matchup=None, team_history=None, star_players=None):
     """Offline hypothetical analysis; do not present invented data as real."""
     icons = {"足球": "⚽", "籃球": "🏀", "棒球": "⚾"}
     if not matchup:
@@ -355,6 +355,8 @@ def offline_analysis(sport, matchup=None):
         total = "小 220.5 分" if pick % 3 else "大 220.5 分"
     else:
         total = "小 8.5 分" if pick % 3 else "大 8.5 分"
+    focus = team_history or f"{winner}：近期歷史戰績暫無可驗證資料"
+    result = star_players or f"{winner}：主力球員名單暫時無法取得"
     accent = {"足球": "#0D9488", "籃球": "#EA580C", "棒球": "#6366F1"}[sport]
     def txt(value, size="sm", color="#334155", weight="regular"):
         return {"type": "text", "text": value, "size": size, "color": color, "weight": weight, "wrap": True}
@@ -371,9 +373,8 @@ def offline_analysis(sport, matchup=None):
                         txt(f"{sport} · 對戰情境分析", "xs", "#CBD5E1")]},
                 "body": {"type": "box", "layout": "vertical", "backgroundColor": "#FFFFFF",
                     "paddingAll": "12px", "spacing": "sm", "contents": [
-                        panel("🔍 分析重點", focus),
-                        panel("👤 球員觀察", scenarios),
-                        panel("🎯 球員關鍵看點", result),
+                        panel("📊 推薦隊伍｜近期戰績", focus),
+                        panel("⭐ 推薦隊伍｜主力球員", result),
                         {"type": "box", "layout": "vertical", "backgroundColor": "#0F172A",
                          "cornerRadius": "12px", "paddingAll": "13px", "spacing": "sm",
                          "contents": [
@@ -527,6 +528,69 @@ async def upcoming_match_cards(sport):
             "contents": {"type": "carousel", "contents": bubbles}}
 
 
+async def winner_team_details(sport, home, away):
+    """Best-effort factual team results and roster; no invented player names."""
+    import difflib
+    winner_hash = int(hashlib.sha256((sport + "|" + home + "|" + away).encode()).hexdigest()[:8], 16)
+    winner = home if winner_hash % 2 == 0 else away
+    league = {"足球": "soccer/ger.1", "籃球": "basketball/nba", "棒球": "baseball/mlb"}[sport]
+    base = "https://site.api.espn.com/apis/site/v2/sports/" + league
+    history, players = None, None
+    try:
+        async with httpx.AsyncClient(timeout=2.3) as client:
+            teams_resp = await client.get(base + "/teams")
+            teams_resp.raise_for_status()
+            raw_teams = teams_resp.json().get("sports", [{}])[0].get("leagues", [{}])[0].get("teams", [])
+            candidates = [entry.get("team", {}) for entry in raw_teams]
+            def score(team):
+                name = team.get("displayName", "")
+                short = team.get("name", "")
+                names = [name, short, team_zh(name), team_zh(short)]
+                return max(difflib.SequenceMatcher(None, winner.casefold(), str(n).casefold()).ratio() for n in names)
+            if not candidates:
+                return None, None
+            team = max(candidates, key=score)
+            if score(team) < 0.52:
+                return None, None
+            team_id = team.get("id")
+            if not team_id:
+                return None, None
+            import asyncio
+            roster_resp, schedule_resp = await asyncio.gather(
+                client.get(base + "/teams/" + str(team_id) + "/roster"),
+                client.get(base + "/teams/" + str(team_id) + "/schedule"),
+                return_exceptions=True)
+            if isinstance(roster_resp, httpx.Response) and roster_resp.status_code == 200:
+                roster = roster_resp.json()
+                athletes = roster.get("athletes", [])
+                if athletes and isinstance(athletes[0], dict) and "items" in athletes[0]:
+                    athletes = [a for group in athletes for a in group.get("items", [])]
+                names = [a.get("displayName") or a.get("fullName") for a in athletes if isinstance(a, dict)]
+                names = [n for n in names if n]
+                if names:
+                    players = f"{winner}｜現役名單：{'、'.join(names[:3])}（非依表現排名）"
+            if isinstance(schedule_resp, httpx.Response) and schedule_resp.status_code == 200:
+                events = schedule_resp.json().get("events", [])
+                completed = [e for e in events if e.get("competitions", [{}])[0].get("status", {}).get("type", {}).get("completed") or e.get("status", {}).get("type", {}).get("completed")]
+                completed = sorted(completed, key=lambda e: e.get("date", ""), reverse=True)[:5]
+                wins = losses = draws = 0
+                for event in completed:
+                    competitors = event.get("competitions", [{}])[0].get("competitors", [])
+                    mine = next((c for c in competitors if str(c.get("team", {}).get("id")) == str(team_id)), None)
+                    if mine:
+                        if mine.get("winner") is True:
+                            wins += 1
+                        elif any(c.get("winner") is True for c in competitors):
+                            losses += 1
+                        else:
+                            draws += 1
+                if wins + losses + draws:
+                    history = f"{winner}｜最近 {wins + losses + draws} 場：{wins} 勝、{draws} 和、{losses} 敗（ESPN 賽程）"
+    except (httpx.HTTPError, ValueError, KeyError, TypeError, IndexError) as exc:
+        log.warning("Team details unavailable: %s", str(exc)[:120])
+    return history, players
+
+
 async def reply_for(text):
     raw = text.strip()
     cmd = raw.replace(" ", "")
@@ -545,7 +609,13 @@ async def reply_for(text):
         rest = raw[2:].strip()
         for sport in SPORTS:
             if rest.startswith(sport):
-                return offline_analysis(sport, rest[len(sport):].strip())
+                matchup = rest[len(sport):].strip()
+                import re
+                parts = re.split(r"\\s*(?:vs\\.?|對戰|對|－|—)\\s*", matchup, maxsplit=1, flags=re.IGNORECASE)
+                if len(parts) != 2 or not all(x.strip() for x in parts):
+                    return offline_analysis(sport, matchup)
+                history, players = await winner_team_details(sport, parts[0].strip()[:35], parts[1].strip()[:35])
+                return offline_analysis(sport, matchup, history, players)
     if cmd in ("會員中心", "VIP"):
         return "【會員中心】\n目前賽事查詢與公開數據分析免費使用。\n尚未開放註冊、登入、付費或訂閱。"
     return MENU
@@ -593,12 +663,12 @@ async def ensure_persistent_rich_menu():
             existing = await client.get("https://api.line.me/v2/bot/richmenu/list", headers=headers)
             existing.raise_for_status()
             for menu in existing.json().get("richmenus", []):
-                if menu.get("name") == "Sports AI Persistent Menu v0.6.11":
+                if menu.get("name") == "Sports AI Persistent Menu v0.6.12":
                     rich_id = menu["richMenuId"]
                     break
             else:
                 payload = {"size": {"width": 1200, "height": 405},
-                           "selected": True, "name": "Sports AI Persistent Menu v0.6.11",
+                           "selected": True, "name": "Sports AI Persistent Menu v0.6.12",
                            "chatBarText": "⚽ 體育賽事快捷選單", "areas": areas}
                 created = await client.post("https://api.line.me/v2/bot/richmenu",
                                             headers=headers, json=payload)
@@ -635,7 +705,7 @@ async def setup_rich_menu_on_startup():
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "line-sports-ai", "version": "0.6.11"}
+    return {"status": "ok", "service": "line-sports-ai", "version": "0.6.12"}
 
 @app.post("/webhooks/line")
 async def webhook(request: Request, x_line_signature: str | None = Header(default=None)):
