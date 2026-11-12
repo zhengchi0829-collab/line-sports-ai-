@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 
-app = FastAPI(title="體育AI分析系統", version="0.6.30")
+app = FastAPI(title="體育AI分析系統", version="0.6.31")
 log = logging.getLogger("sports_bot")
 TZ = ZoneInfo("Asia/Taipei")
 MENU = ("歡迎使用【體育AI分析系統】！\n\n"
@@ -320,7 +320,7 @@ async def sports_report(sport, analysis=False, future=False):
     result = "\n".join(lines)
     return result[:4800]
 
-def offline_analysis(sport, matchup=None, team_history=None, star_players=None):
+def offline_analysis(sport, matchup=None, team_history=None, star_players=None, league=None):
     """Offline hypothetical analysis; do not present invented data as real."""
     icons = {"足球": "⚽", "籃球": "🏀", "棒球": "⚾"}
     if not matchup:
@@ -336,10 +336,24 @@ def offline_analysis(sport, matchup=None, team_history=None, star_players=None):
         scenarios = f"{home}：留意前鋒把握機會與中場傳球。\n{away}：觀察邊鋒速度及反擊效率。"
         result = "關鍵球員：雙方主力射手、門將。\n看點：射門轉換率與門將撲救。"
     elif sport == "籃球":
-        odds = f"{home} 50%｜{away} 50%"
-        focus = "① 進攻與防守效率\n② 三分球命中率與失誤\n③ 籃板、傷停與輪休"
-        scenarios = f"{home}：看主控組織與禁區得分。\n{away}：看主力射手三分與快攻。"
-        result = "關鍵球員：雙方得分主力與中鋒。\n看點：三分命中率、籃板及犯規。"
+        league = league or "NBA"
+        odds = f"{home}｜{away}"
+        if league == "NCAA":
+            focus = "① 節奏與半場進攻效率\n② 失誤率、進攻籃板與罰球\n③ 主客場差異與年輕球員穩定度"
+            scenarios = f"{home}：留意控衛決策、禁區終結與二次進攻。\n{away}：觀察外線效率、防守輪轉與犯規控制。"
+            result = "關鍵看點：主控、主要得分手、護框中鋒。\nNCAA 波動較大，需特別看失誤、罰球與籃板。"
+        elif league == "NBL":
+            focus = "① 攻防節奏與轉換快攻\n② 外援得分影響與三分效率\n③ 籃板、犯規與客場旅行負荷"
+            scenarios = f"{home}：觀察外援持球與禁區攻擊。\n{away}：留意外線火力、板凳深度與快攻。"
+            result = "關鍵看點：主力外援、控衛與中鋒。\nNBL 常見高節奏，需關注外線與轉換得分。"
+        elif league == "TPBL":
+            focus = "① 洋將與本土主力使用比例\n② 三分效率、失誤與籃板\n③ 輪替深度、犯規與近期賽程"
+            scenarios = f"{home}：觀察洋將進攻核心與禁區優勢。\n{away}：留意本土後場、三分與板凳火力。"
+            result = "關鍵看點：洋將核心、本土主控與禁區球員。\nTPBL 需特別看洋將狀態與本土輪替效率。"
+        else:
+            focus = "① 進攻與防守效率、比賽節奏\n② 三分球、失誤與罰球\n③ 籃板、傷停、輪休與背靠背"
+            scenarios = f"{home}：看主控組織、禁區得分與先發效率。\n{away}：看主力射手、三分與轉換快攻。"
+            result = "關鍵看點：主控、得分主力與中鋒。\nNBA 需綜合節奏、三分、籃板與輪休狀況。"
     else:
         odds = f"{home} 50%｜{away} 50%"
         focus = "① 先發投手與近期投球負荷\n② 牛棚可用性\n③ 打線、守備與球場條件"
@@ -347,7 +361,7 @@ def offline_analysis(sport, matchup=None, team_history=None, star_players=None):
         result = "關鍵球員：雙方先發投手、中心打者。\n看點：三振保送比與得點圈打擊。"
     # Stable demo pick; no fabricated win probabilities or market odds.
     import hashlib
-    pick = int(hashlib.sha256((sport + "|" + home + "|" + away).encode()).hexdigest()[:8], 16)
+    pick = int(hashlib.sha256((sport + "|" + str(league or "") + "|" + home + "|" + away).encode()).hexdigest()[:8], 16)
     winner = home if pick % 2 == 0 else away
     if sport == "足球":
         # Keep the demo total stable for the same matchup, but vary the line by matchup
@@ -357,7 +371,17 @@ def offline_analysis(sport, matchup=None, team_history=None, star_players=None):
         direction = "大" if ((pick >> 1) & 1) else "小"
         total = f"{direction} {line} 球"
     elif sport == "籃球":
-        total = "小 220.5 分" if pick % 3 else "大 220.5 分"
+        league = league or "NBA"
+        basketball_lines = {
+            "NBA": ("214.5", "218.5", "222.5", "226.5", "230.5", "234.5", "238.5"),
+            "NCAA": ("128.5", "133.5", "138.5", "143.5", "148.5", "153.5", "158.5"),
+            "NBL": ("165.5", "171.5", "177.5", "183.5", "189.5"),
+            "TPBL": ("156.5", "162.5", "168.5", "174.5", "180.5", "186.5"),
+        }
+        lines = basketball_lines.get(league, basketball_lines["NBA"])
+        line = lines[(pick >> 3) % len(lines)]
+        direction = "大" if ((pick >> 1) & 1) else "小"
+        total = f"{direction} {line} 分"
     else:
         # Vary baseball totals by matchup instead of pinning every card to 8.5.
         # This remains a stable simulated direction, not a live sportsbook line.
@@ -371,7 +395,8 @@ def offline_analysis(sport, matchup=None, team_history=None, star_players=None):
     elif sport == "足球":
         focus = f"{winner}｜歷史戰績尚未核實；本場可留意控球、射門及近期攻守表現。"
     elif sport == "籃球":
-        focus = f"{winner}｜歷史戰績尚未核實；本場可留意近況、進攻效率與籃板。"
+        league_name = league or "NBA"
+        focus = f"{winner}｜{league_name} 歷史戰績尚未核實；本場可留意近況、節奏、進攻效率與籃板。"
     else:
         focus = f"{winner}｜歷史戰績尚未核實；本場可留意近期勝敗、先發投手與牛棚。"
     if star_players:
@@ -379,7 +404,8 @@ def offline_analysis(sport, matchup=None, team_history=None, star_players=None):
     elif sport == "足球":
         result = f"{winner}｜主力名單尚未核實；重點觀察先發前鋒、中場核心與門將。"
     elif sport == "籃球":
-        result = f"{winner}｜主力名單尚未核實；重點觀察先發控衛、得分主力與中鋒。"
+        league_name = league or "NBA"
+        result = f"{winner}｜{league_name} 主力名單尚未核實；重點觀察控衛、得分主力、禁區球員與輪替深度。"
     else:
         result = f"{winner}｜主力名單尚未核實；重點觀察先發投手、中心打者與終結者。"
     accent = {"足球": "#0D9488", "籃球": "#EA580C", "棒球": "#6366F1"}[sport]
@@ -389,13 +415,14 @@ def offline_analysis(sport, matchup=None, team_history=None, star_players=None):
         return {"type": "box", "layout": "vertical", "backgroundColor": background,
                 "cornerRadius": "12px", "paddingAll": "11px", "spacing": "xs",
                 "contents": [txt(heading, "sm", accent, "bold"), txt(content)]}
-    return {"type": "flex", "altText": f"{sport}對戰分析｜{home} VS {away}",
+    analysis_label = (league or "NBA") if sport == "籃球" else sport
+    return {"type": "flex", "altText": f"{analysis_label}對戰分析｜{home} VS {away}",
             "contents": {"type": "bubble", "size": "kilo",
                 "header": {"type": "box", "layout": "vertical", "backgroundColor": "#0F172A",
                     "paddingAll": "14px", "spacing": "xs", "contents": [
                         txt(f"{icons[sport]}  MATCH ANALYSIS", "xs", "#93C5FD", "bold"),
                         txt(f"{home}  VS  {away}", "md", "#FFFFFF", "bold"),
-                        txt(f"{sport} · 對戰情境分析", "xs", "#CBD5E1")]},
+                        txt(f"{analysis_label} · 對戰情境分析", "xs", "#CBD5E1")]},
                 "body": {"type": "box", "layout": "vertical", "backgroundColor": "#FFFFFF",
                     "paddingAll": "12px", "spacing": "sm", "contents": [
                         panel("📊 分析重點｜推薦隊伍戰績", focus),
@@ -414,7 +441,7 @@ def offline_analysis(sport, matchup=None, team_history=None, star_players=None):
                     "paddingAll": "10px", "spacing": "sm", "contents": [
                         {"type": "button", "style": "primary", "color": accent,
                          "height": "sm", "action": {"type": "message",
-                             "label": f"🔎 其他{sport}賽事", "text": sport}},
+                             "label": f"🔎 其他{analysis_label}賽事", "text": (analysis_label if sport == "籃球" else sport)}},
                         {"type": "button", "style": "secondary", "height": "sm",
                          "action": {"type": "message", "label": "🏠 回主選單", "text": "選單"}}
                     ]}

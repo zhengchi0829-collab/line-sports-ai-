@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.6.30"
+VERSION = "0.6.31"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -442,7 +442,7 @@ class Controller:
             if len(parts) == 2 and all(p.strip() for p in parts):
                 a, b = (p.strip().lstrip(".").strip()[:35] for p in parts)
                 history, players = (None, None) if demo else await self.team_details(base_sport, a, b)
-                card = self.ui.offline_analysis(base_sport, a + " vs " + b, history, players)
+                card = self.ui.offline_analysis(base_sport, a + " vs " + b, history, players, league=league)
                 if isinstance(card, dict):
                     if league:
                         card["contents"]["header"]["contents"][-1]["text"] = f"{league} · 對戰情境分析"
