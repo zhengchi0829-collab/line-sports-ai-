@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.6.37"
+VERSION = "0.6.38"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -355,7 +355,7 @@ def quick_menu() -> dict:
 
 def league_menu() -> dict:
     """Second-level league chooser opened from the basketball button."""
-    return {"type": "flex", "altText": "選擇 NBA、NCAA、NBL 或 TPBL", "quickReply": quick_menu(),
+    return {"type": "flex", "altText": "選擇 NBA、NCAA、NBL 或 TPBL；TPBL 可查看賽程並立即分析", "quickReply": quick_menu(),
             "contents": {"type": "bubble", "size": "kilo",
                 "header": {"type": "box", "layout": "vertical", "backgroundColor": "#0F172A",
                            "paddingAll": "16px", "contents": [
@@ -366,7 +366,7 @@ def league_menu() -> dict:
                              button("🏀 NBA｜美國職籃", "NBA", "#C2410C"),
                              button("🏀 NCAA｜美國大學籃球", "NCAA", "#B45309"),
                              button("🏀 NBL｜澳洲職籃", "NBL", "#0369A1"),
-                             button("🏀 TPBL｜台灣職籃", "TPBL", "#7C3AED"),
+                             button("🏀 TPBL｜台灣職籃｜賽程＋分析", "TPBL", "#7C3AED"),
                              button("🏠 回主選單", MENU, "#334155")
                          ]}}}
 
