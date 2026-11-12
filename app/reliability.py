@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.6.19"
+VERSION = "0.6.20"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -183,10 +183,12 @@ class Fixtures:
         if sport == "basketball":
             return [
                 ("nba_schedule", "https://cdn.nba.com/static/json/staticData/scheduleLeagueV2_1.json", {}, "nba_schedule"),
-                ("nba_today", "https://cdn.nba.com/static/json/liveData/scoreboard/todaysScoreboard_00.json", {}, "nba_today"),
-                ("nba_espn", "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard",
-                 {"dates": (now - timedelta(days=1)).strftime("%Y%m%d") + "-" +
-                  (now + timedelta(days=14)).strftime("%Y%m%d"), "limit": 200}, "espn"),
+                # The scoreboard date-range query returns HTTP 400 for this feed.
+                # Query separate valid calendar dates; never retry a 403 with a proxy.
+                ("nba_espn_today", "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard",
+                 {"dates": now.strftime("%Y%m%d")}, "espn"),
+                ("nba_espn_next", "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard",
+                 {"dates": (now + timedelta(days=1)).strftime("%Y%m%d")}, "espn"),
             ]
         return [("mlb", "https://statsapi.mlb.com/api/v1/schedule",
                  {"sportId": 1, "startDate": (now - timedelta(days=1)).strftime("%Y-%m-%d"),
