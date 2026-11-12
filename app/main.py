@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 
-app = FastAPI(title="體育AI分析系統", version="0.6.0")
+app = FastAPI(title="體育AI分析系統", version="0.6.1")
 log = logging.getLogger("sports_bot")
 TZ = ZoneInfo("Asia/Taipei")
 MENU = ("歡迎使用【體育AI分析系統】！\n\n"
@@ -352,6 +352,51 @@ def offline_analysis(sport, matchup=None):
             f"🎯 分析結論：{result}\n\n"
             "⚠️ 離線情境推演；未取得即時數據，百分比是中立起始值，不是真實預測勝率。")
 
+TEAM_ZH = {
+    "Bayern Munich": "拜仁慕尼黑", "FC Bayern München": "拜仁慕尼黑", "Borussia Dortmund": "多特蒙德",
+    "Bayer 04 Leverkusen": "勒沃庫森", "Bayer Leverkusen": "勒沃庫森", "RB Leipzig": "萊比錫",
+    "Eintracht Frankfurt": "法蘭克福", "VfB Stuttgart": "斯圖加特", "VfL Wolfsburg": "沃夫斯堡",
+    "SC Freiburg": "弗萊堡", "1. FC Union Berlin": "柏林聯合", "1. FSV Mainz 05": "美因茨",
+    "Borussia Mönchengladbach": "門興格拉德巴赫", "Werder Bremen": "雲達不萊梅",
+    "SV Werder Bremen": "雲達不萊梅", "FC Augsburg": "奧格斯堡", "TSG Hoffenheim": "霍芬海姆",
+    "1. FC Heidenheim 1846": "海登海姆", "FC St. Pauli": "聖保利",
+    "Hamburger SV": "漢堡", "1. FC Köln": "科隆",
+    "Atlanta Hawks": "亞特蘭大老鷹", "Boston Celtics": "波士頓塞爾提克",
+    "Brooklyn Nets": "布魯克林籃網", "Charlotte Hornets": "夏洛特黃蜂",
+    "Chicago Bulls": "芝加哥公牛", "Cleveland Cavaliers": "克里夫蘭騎士",
+    "Dallas Mavericks": "達拉斯獨行俠", "Denver Nuggets": "丹佛金塊",
+    "Detroit Pistons": "底特律活塞", "Golden State Warriors": "金州勇士",
+    "Houston Rockets": "休士頓火箭", "Indiana Pacers": "印第安納溜馬",
+    "LA Clippers": "洛杉磯快艇", "Los Angeles Clippers": "洛杉磯快艇",
+    "Los Angeles Lakers": "洛杉磯湖人", "Memphis Grizzlies": "曼菲斯灰熊",
+    "Miami Heat": "邁阿密熱火", "Milwaukee Bucks": "密爾瓦基公鹿",
+    "Minnesota Timberwolves": "明尼蘇達灰狼", "New Orleans Pelicans": "紐奧良鵜鶘",
+    "New York Knicks": "紐約尼克", "Oklahoma City Thunder": "奧克拉荷馬雷霆",
+    "Orlando Magic": "奧蘭多魔術", "Philadelphia 76ers": "費城七六人",
+    "Phoenix Suns": "鳳凰城太陽", "Portland Trail Blazers": "波特蘭拓荒者",
+    "Sacramento Kings": "沙加緬度國王", "San Antonio Spurs": "聖安東尼奧馬刺",
+    "Toronto Raptors": "多倫多暴龍", "Utah Jazz": "猶他爵士",
+    "Washington Wizards": "華盛頓巫師",
+    "Arizona Diamondbacks": "亞利桑那響尾蛇", "Athletics": "運動家",
+    "Atlanta Braves": "亞特蘭大勇士", "Baltimore Orioles": "巴爾的摩金鶯",
+    "Boston Red Sox": "波士頓紅襪", "Chicago Cubs": "芝加哥小熊",
+    "Chicago White Sox": "芝加哥白襪", "Cincinnati Reds": "辛辛那提紅人",
+    "Cleveland Guardians": "克里夫蘭守護者", "Colorado Rockies": "科羅拉多洛磯",
+    "Detroit Tigers": "底特律老虎", "Houston Astros": "休士頓太空人",
+    "Kansas City Royals": "堪薩斯市皇家", "Los Angeles Angels": "洛杉磯天使",
+    "Los Angeles Dodgers": "洛杉磯道奇", "Miami Marlins": "邁阿密馬林魚",
+    "Milwaukee Brewers": "密爾瓦基釀酒人", "Minnesota Twins": "明尼蘇達雙城",
+    "New York Mets": "紐約大都會", "New York Yankees": "紐約洋基",
+    "Philadelphia Phillies": "費城費城人", "Pittsburgh Pirates": "匹茲堡海盜",
+    "San Diego Padres": "聖地牙哥教士", "San Francisco Giants": "舊金山巨人",
+    "Seattle Mariners": "西雅圖水手", "St. Louis Cardinals": "聖路易紅雀",
+    "Tampa Bay Rays": "坦帕灣光芒", "Texas Rangers": "德州遊騎兵",
+    "Toronto Blue Jays": "多倫多藍鳥", "Washington Nationals": "華盛頓國民",
+}
+
+def team_zh(name):
+    return TEAM_ZH.get(name, name)
+
 async def upcoming_match_cards(sport):
     """Return a tappable LINE carousel with real dated fixtures."""
     now = datetime.now(TZ)
@@ -395,24 +440,41 @@ async def upcoming_match_cards(sport):
     if not games:
         return f"【{sport}】暫時無法取得近期真實賽程，請稍後點選「{sport}」重新整理。"
     bubbles = []
+    palette = {"足球": ("#0B3B36", "#12A594", "⚽"), "籃球": ("#47230D", "#EA580C", "🏀"), "棒球": ("#1F2459", "#6366F1", "⚾")}
+    dark, accent, emoji = palette[sport]
     for dt, away, home, league in games:
-        command = f"分析{sport} {away} vs {home}"
+        away_zh, home_zh = team_zh(away), team_zh(home)
+        command = f"分析{sport} {away_zh} vs {home_zh}"
         if len(command) > 300:
             continue
         bubbles.append({
-            "type": "bubble", "size": "micro",
-            "body": {"type": "box", "layout": "vertical", "spacing": "md", "contents": [
-                {"type": "text", "text": league + "｜台灣時間", "size": "xs", "color": "#64748B"},
-                {"type": "text", "text": dt.strftime("%m/%d %H:%M"), "weight": "bold", "size": "lg"},
-                {"type": "text", "text": away + " VS " + home, "wrap": True, "size": "sm", "maxLines": 4}
-            ]},
-            "footer": {"type": "box", "layout": "vertical", "contents": [
-                {"type": "button", "style": "primary", "height": "sm",
-                 "action": {"type": "message", "label": "立即分析", "text": command}}
-            ]}
+            "type": "bubble", "size": "kilo",
+            "header": {"type": "box", "layout": "vertical", "backgroundColor": dark,
+                "paddingAll": "20px", "spacing": "sm", "contents": [
+                    {"type": "text", "text": f"{emoji}  {league}  /  MATCH CENTER", "size": "xs", "weight": "bold", "color": "#D1FAE5"},
+                    {"type": "text", "text": dt.strftime("%m/%d  %H:%M"), "size": "xl", "weight": "bold", "color": "#FFFFFF"},
+                    {"type": "text", "text": "台灣時間  •  即將開賽", "size": "xs", "color": "#CBD5E1"}
+                ]},
+            "body": {"type": "box", "layout": "vertical", "backgroundColor": "#F4F7FB",
+                "paddingAll": "20px", "spacing": "lg", "contents": [
+                    {"type": "text", "text": "近期焦點對戰", "size": "xs", "weight": "bold", "color": accent},
+                    {"type": "box", "layout": "vertical", "spacing": "sm", "contents": [
+                        {"type": "text", "text": away_zh, "weight": "bold", "size": "lg", "color": "#0F172A", "wrap": True},
+                        {"type": "text", "text": "V S", "weight": "bold", "size": "md", "align": "center", "color": accent},
+                        {"type": "text", "text": home_zh, "weight": "bold", "size": "lg", "color": "#0F172A", "wrap": True}
+                    ]},
+                    {"type": "separator", "color": "#CBD5E1"},
+                    {"type": "text", "text": "點擊下方按鈕查看對戰情境分析", "size": "xs", "color": "#64748B", "wrap": True}
+                ]},
+            "footer": {"type": "box", "layout": "vertical", "backgroundColor": "#FFFFFF",
+                "paddingAll": "16px", "contents": [
+                    {"type": "button", "style": "primary", "color": accent, "height": "md",
+                     "action": {"type": "message", "label": "📊 立即分析", "text": command}}
+                ]}
         })
-    return {"type": "flex", "altText": f"{sport}近期賽事｜點選立即分析",
+    return {"type": "flex", "altText": f"{sport}近期賽事｜中文隊名｜點選立即分析",
             "contents": {"type": "carousel", "contents": bubbles}}
+
 
 async def reply_for(text):
     raw = text.strip()
@@ -440,7 +502,7 @@ async def reply_for(text):
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "line-sports-ai", "version": "0.6.0"}
+    return {"status": "ok", "service": "line-sports-ai", "version": "0.6.1"}
 
 @app.post("/webhooks/line")
 async def webhook(request: Request, x_line_signature: str | None = Header(default=None)):
