@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 
-app = FastAPI(title="體育AI分析系統", version="0.6.5")
+app = FastAPI(title="體育AI分析系統", version="0.6.6")
 log = logging.getLogger("sports_bot")
 TZ = ZoneInfo("Asia/Taipei")
 MENU = ("歡迎使用【體育AI分析系統】！\n\n"
@@ -333,18 +333,18 @@ def offline_analysis(sport, matchup=None):
     if sport == "足球":
         odds = f"{home} 35%｜平局 30%｜{away} 35%"
         focus = "① 主場優勢與控球節奏\n② 兩隊攻防轉換與定位球\n③ 先發傷停與賽程密度"
-        scenarios = f"若{home}能掌控中場，主隊勝面提高；若{away}反擊效率較高，客隊更有機會。"
-        result = "暫無足夠依據判斷優勢方；建議關注先發與近期戰績。"
+        scenarios = f"{home}：留意前鋒把握機會與中場傳球。\n{away}：觀察邊鋒速度及反擊效率。"
+        result = "關鍵球員：雙方主力射手、門將。\n看點：射門轉換率與門將撲救。"
     elif sport == "籃球":
         odds = f"{home} 50%｜{away} 50%"
         focus = "① 進攻與防守效率\n② 三分球命中率與失誤\n③ 籃板、傷停與輪休"
-        scenarios = f"若{home}控制籃板和失誤，勝面增加；若{away}外線發揮，局勢可能反轉。"
-        result = "雙方暫以五五波看待，關鍵是先發陣容與比賽節奏。"
+        scenarios = f"{home}：看主控組織與禁區得分。\n{away}：看主力射手三分與快攻。"
+        result = "關鍵球員：雙方得分主力與中鋒。\n看點：三分命中率、籃板及犯規。"
     else:
         odds = f"{home} 50%｜{away} 50%"
         focus = "① 先發投手與近期投球負荷\n② 牛棚可用性\n③ 打線、守備與球場條件"
-        scenarios = f"若{home}先發投手壓制成功，主隊較有利；若{away}提早攻破先發，客隊機會提高。"
-        result = "暫無足夠依據判斷優勢方；先發投手資訊最重要。"
+        scenarios = f"{home}：看先發投手控球與牛棚。\n{away}：看中心打線長打及上壘。"
+        result = "關鍵球員：雙方先發投手、中心打者。\n看點：三振保送比與得點圈打擊。"
     # Stable demo pick; no fabricated win probabilities or market odds.
     import hashlib
     pick = int(hashlib.sha256((sport + "|" + home + "|" + away).encode()).hexdigest()[:8], 16)
@@ -372,8 +372,8 @@ def offline_analysis(sport, matchup=None):
                 "body": {"type": "box", "layout": "vertical", "backgroundColor": "#FFFFFF",
                     "paddingAll": "18px", "spacing": "md", "contents": [
                         panel("🔍 分析重點", focus),
-                        panel("📈 比賽情境", scenarios),
-                        panel("🎯 分析結論", result),
+                        panel("👤 球員觀察", scenarios),
+                        panel("🎯 球員關鍵看點", result),
                         {"type": "box", "layout": "vertical", "backgroundColor": "#0F172A",
                          "cornerRadius": "14px", "paddingAll": "18px", "spacing": "md",
                          "contents": [
@@ -542,7 +542,7 @@ async def reply_for(text):
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "line-sports-ai", "version": "0.6.5"}
+    return {"status": "ok", "service": "line-sports-ai", "version": "0.6.6"}
 
 @app.post("/webhooks/line")
 async def webhook(request: Request, x_line_signature: str | None = Header(default=None)):
