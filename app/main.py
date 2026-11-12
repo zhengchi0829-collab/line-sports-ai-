@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 
-app = FastAPI(title="體育AI分析系統", version="0.5.2")
+app = FastAPI(title="體育AI分析系統", version="0.6.0")
 log = logging.getLogger("sports_bot")
 TZ = ZoneInfo("Asia/Taipei")
 MENU = ("歡迎使用【體育AI分析系統】！\n\n"
@@ -352,21 +352,82 @@ def offline_analysis(sport, matchup=None):
             f"🎯 分析結論：{result}\n\n"
             "⚠️ 離線情境推演；未取得即時數據，百分比是中立起始值，不是真實預測勝率。")
 
+async def upcoming_match_cards(sport):
+    """Return a tappable LINE carousel with real dated fixtures."""
+    now = datetime.now(TZ)
+    games = []
+    async with httpx.AsyncClient(timeout=4) as client:
+        try:
+            if sport == "足球":
+                for season in (now.year - 1, now.year):
+                    try:
+                        r = await client.get(f"https://api.openligadb.de/getmatchdata/bl1/{season}")
+                        r.raise_for_status()
+                        for g in r.json():
+                            raw = g.get("matchDateTimeUTC")
+                            if not raw:
+                                continue
+                            dt = datetime.fromisoformat(raw.replace("Z", "+00:00")).astimezone(TZ)
+                            if dt >= now:
+                                games.append((dt, g.get("team1", {}).get("teamName", ""), g.get("team2", {}).get("teamName", ""), "德甲"))
+                    except (httpx.HTTPError, ValueError, TypeError, KeyError):
+                        continue
+            elif sport == "籃球":
+                r = await client.get("https://cdn.nba.com/static/json/liveData/scoreboard/todaysScoreboard_00.json")
+                r.raise_for_status()
+                for g in r.json().get("scoreboard", {}).get("games", []):
+                    dt = datetime.fromisoformat(g["gameTimeUTC"].replace("Z", "+00:00")).astimezone(TZ)
+                    if dt >= now and g.get("gameStatus") == 1:
+                        a, h = g.get("awayTeam", {}), g.get("homeTeam", {})
+                        games.append((dt, f"{a.get('teamCity', '')} {a.get('teamName', '')}".strip(), f"{h.get('teamCity', '')} {h.get('teamName', '')}".strip(), "NBA"))
+            elif sport == "棒球":
+                r = await client.get("https://statsapi.mlb.com/api/v1/schedule", params={"sportId": 1, "startDate": now.strftime("%Y-%m-%d"), "endDate": (now + timedelta(days=90)).strftime("%Y-%m-%d")})
+                r.raise_for_status()
+                for d in r.json().get("dates", []):
+                    for g in d.get("games", []):
+                        dt = datetime.fromisoformat(g["gameDate"].replace("Z", "+00:00")).astimezone(TZ)
+                        if dt >= now:
+                            teams = g.get("teams", {})
+                            games.append((dt, teams.get("away", {}).get("team", {}).get("name", ""), teams.get("home", {}).get("team", {}).get("name", ""), "MLB"))
+        except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+            log.warning("Fixture cards unavailable for %s: %s", sport, str(exc)[:100])
+    games = sorted((x for x in games if x[1] and x[2]), key=lambda x: x[0])[:8]
+    if not games:
+        return f"【{sport}】暫時無法取得近期真實賽程，請稍後點選「{sport}」重新整理。"
+    bubbles = []
+    for dt, away, home, league in games:
+        command = f"分析{sport} {away} vs {home}"
+        if len(command) > 300:
+            continue
+        bubbles.append({
+            "type": "bubble", "size": "micro",
+            "body": {"type": "box", "layout": "vertical", "spacing": "md", "contents": [
+                {"type": "text", "text": league + "｜台灣時間", "size": "xs", "color": "#64748B"},
+                {"type": "text", "text": dt.strftime("%m/%d %H:%M"), "weight": "bold", "size": "lg"},
+                {"type": "text", "text": away + " VS " + home, "wrap": True, "size": "sm", "maxLines": 4}
+            ]},
+            "footer": {"type": "box", "layout": "vertical", "contents": [
+                {"type": "button", "style": "primary", "height": "sm",
+                 "action": {"type": "message", "label": "立即分析", "text": command}}
+            ]}
+        })
+    return {"type": "flex", "altText": f"{sport}近期賽事｜點選立即分析",
+            "contents": {"type": "carousel", "contents": bubbles}}
+
 async def reply_for(text):
     raw = text.strip()
     cmd = raw.replace(" ", "")
     if cmd in ("你好", "嗨", "開始", "選單", "幫助", "help"):
         return MENU
     if cmd in SPORTS:
-        return offline_analysis(cmd)
+        return await upcoming_match_cards(cmd)
     if cmd in ("今日賽事", "未來賽事"):
         results = []
         for sport in SPORTS:
             results.append(await sports_report(sport, future=(cmd == "未來賽事")))
         return "\n\n".join(results)[:4800]
     if cmd in ("賽事分析", "AI分析", "AI預測", "預測戰績"):
-        return ("【賽事數據分析】\n請輸入「分析足球」、「分析籃球」或「分析棒球」，"
-                "輸入「分析足球 A隊 vs B隊」進行情境分析。\n沒有真實數據時會標示中立基準。")
+        return MENU
     if raw.startswith("分析"):
         rest = raw[2:].strip()
         for sport in SPORTS:
@@ -379,7 +440,7 @@ async def reply_for(text):
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "line-sports-ai", "version": "0.5.2"}
+    return {"status": "ok", "service": "line-sports-ai", "version": "0.6.0"}
 
 @app.post("/webhooks/line")
 async def webhook(request: Request, x_line_signature: str | None = Header(default=None)):
@@ -413,7 +474,7 @@ async def webhook(request: Request, x_line_signature: str | None = Header(defaul
                     "https://api.line.me/v2/bot/message/reply",
                     headers={"Authorization": f"Bearer {token}"},
                     json={"replyToken": reply_token, "messages": [
-                        menu_card() if message == MENU else {"type": "text", "text": message, "quickReply": quick_replies()}
+                        menu_card() if message == MENU else (message if isinstance(message, dict) else {"type": "text", "text": message, "quickReply": quick_replies()})
                     ]},
                 )
                 result.raise_for_status()
