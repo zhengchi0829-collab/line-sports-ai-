@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 
-app = FastAPI(title="體育AI分析系統", version="0.5.1")
+app = FastAPI(title="體育AI分析系統", version="0.5.2")
 log = logging.getLogger("sports_bot")
 TZ = ZoneInfo("Asia/Taipei")
 MENU = ("歡迎使用【體育AI分析系統】！\n\n"
@@ -321,34 +321,36 @@ async def sports_report(sport, analysis=False, future=False):
     return result[:4800]
 
 def offline_analysis(sport, matchup=None):
-    """Transparent no-data scenario analysis; never invent team statistics."""
+    """Offline hypothetical analysis; do not present invented data as real."""
     icons = {"足球": "⚽", "籃球": "🏀", "棒球": "⚾"}
-    factors = {
-        "足球": "主客場、近期進球與失球、傷停、賽程密度、先發陣容",
-        "籃球": "主客場、進攻效率、防守效率、輪休、傷停與節奏",
-        "棒球": "先發投手、牛棚消耗、打線、主客場與守備",
-    }
     if not matchup:
-        return (f"{icons[sport]}【{sport}情境分析｜離線模式】\\n"
-                f"目前沒有可驗證的即時對戰資料。\\n"
-                f"請輸入：分析{sport} A隊 vs B隊\\n"
-                f"例如：分析{sport} 主隊 vs 客隊\\n"
-                f"分析因素：{factors[sport]}\\n"
-                "不會虛構今天的比賽、戰績或球員資訊。")
-    parts = __import__("re").split(r"\\s*(?:vs\\.?|VS\\.?|對|對戰|－|—|-)\\s*", matchup, maxsplit=1, flags=__import__("re").IGNORECASE)
-    if len(parts) != 2 or not all(x.strip() for x in parts) or any(len(x.strip()) > 35 for x in parts):
-        return f"格式：分析{sport} A隊 vs B隊\\n例如：分析{sport} 曼城 vs 利物浦"
-    a, b = (x.strip() for x in parts)
+        return f"{icons[sport]}【{sport}離線分析】\n請輸入：分析{sport} A隊 vs B隊\n例如：分析{sport} 曼城 vs 利物浦"
+    import re
+    parts = re.split(r"\s*(?:vs\.?|對戰|對|－|—)\s*", matchup, maxsplit=1, flags=re.IGNORECASE)
+    if len(parts) != 2 or not all(x.strip() for x in parts):
+        return f"格式：分析{sport} A隊 vs B隊\n例如：分析{sport} 曼城 vs 利物浦"
+    home, away = [x.strip()[:35] for x in parts]
     if sport == "足球":
-        estimate = f"{a} 35%｜和局 30%｜{b} 35%"
+        odds = f"{home} 35%｜平局 30%｜{away} 35%"
+        focus = "① 主場優勢與控球節奏\n② 兩隊攻防轉換與定位球\n③ 先發傷停與賽程密度"
+        scenarios = f"若{home}能掌控中場，主隊勝面提高；若{away}反擊效率較高，客隊更有機會。"
+        result = "暫無足夠依據判斷優勢方；建議關注先發與近期戰績。"
+    elif sport == "籃球":
+        odds = f"{home} 50%｜{away} 50%"
+        focus = "① 進攻與防守效率\n② 三分球命中率與失誤\n③ 籃板、傷停與輪休"
+        scenarios = f"若{home}控制籃板和失誤，勝面增加；若{away}外線發揮，局勢可能反轉。"
+        result = "雙方暫以五五波看待，關鍵是先發陣容與比賽節奏。"
     else:
-        estimate = f"{a} 50%｜{b} 50%"
-    return (f"{icons[sport]}【{sport}對戰情境分析】\\n{a} vs {b}\\n"
-            f"無資料基準機率：{estimate}\\n"
-            f"評估方向：{factors[sport]}\\n"
-            "分析：未取得近期戰績、傷停與先發資訊，無證據判定任一方佔優；"
-            "以上僅為中立基準，不是依球隊實力計算的預測。\\n"
-            "⚠️ 離線假設性分析，未確認賽事存在，不可當作真實勝率或投注依據。")
+        odds = f"{home} 50%｜{away} 50%"
+        focus = "① 先發投手與近期投球負荷\n② 牛棚可用性\n③ 打線、守備與球場條件"
+        scenarios = f"若{home}先發投手壓制成功，主隊較有利；若{away}提早攻破先發，客隊機會提高。"
+        result = "暫無足夠依據判斷優勢方；先發投手資訊最重要。"
+    return (f"{icons[sport]}【{sport}對戰分析】\n{home} VS {away}\n\n"
+            f"📊 無資料基準：{odds}\n\n"
+            f"🔍 分析重點：\n{focus}\n\n"
+            f"📈 比賽情境：{scenarios}\n\n"
+            f"🎯 分析結論：{result}\n\n"
+            "⚠️ 離線情境推演；未取得即時數據，百分比是中立起始值，不是真實預測勝率。")
 
 async def reply_for(text):
     raw = text.strip()
@@ -377,7 +379,7 @@ async def reply_for(text):
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "line-sports-ai", "version": "0.5.1"}
+    return {"status": "ok", "service": "line-sports-ai", "version": "0.5.2"}
 
 @app.post("/webhooks/line")
 async def webhook(request: Request, x_line_signature: str | None = Header(default=None)):
