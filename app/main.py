@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 
-app = FastAPI(title="體育AI分析系統", version="0.4.0")
+app = FastAPI(title="體育AI分析系統", version="0.5.0")
 log = logging.getLogger("sports_bot")
 TZ = ZoneInfo("Asia/Taipei")
 MENU = ("歡迎使用【體育AI分析系統】！\n\n"
@@ -320,8 +320,38 @@ async def sports_report(sport, analysis=False, future=False):
     result = "\n".join(lines)
     return result[:4800]
 
+def offline_analysis(sport, matchup=None):
+    """Transparent no-data scenario analysis; never invent team statistics."""
+    icons = {"足球": "⚽", "籃球": "🏀", "棒球": "⚾"}
+    factors = {
+        "足球": "主客場、近期進球與失球、傷停、賽程密度、先發陣容",
+        "籃球": "主客場、進攻效率、防守效率、輪休、傷停與節奏",
+        "棒球": "先發投手、牛棚消耗、打線、主客場與守備",
+    }
+    if not matchup:
+        return (f"{icons[sport]}【{sport}情境分析｜離線模式】\\n"
+                f"目前沒有可驗證的即時對戰資料。\\n"
+                f"請輸入：分析{sport} A隊 vs B隊\\n"
+                f"例如：分析{sport} 主隊 vs 客隊\\n"
+                f"分析因素：{factors[sport]}\\n"
+                "不會虛構今天的比賽、戰績或球員資訊。")
+    parts = __import__("re").split(r"\\s*(?:vs\\.?|VS\\.?|對|對戰|－|—|-)\\s*", matchup, maxsplit=1, flags=__import__("re").IGNORECASE)
+    if len(parts) != 2 or not all(x.strip() for x in parts) or any(len(x.strip()) > 35 for x in parts):
+        return f"格式：分析{sport} A隊 vs B隊\\n例如：分析{sport} 曼城 vs 利物浦"
+    a, b = (x.strip() for x in parts)
+    if sport == "足球":
+        estimate = f"{a} 35%｜和局 30%｜{b} 35%"
+    else:
+        estimate = f"{a} 50%｜{b} 50%"
+    return (f"{icons[sport]}【{sport}對戰情境分析】\\n{a} vs {b}\\n"
+            f"無資料基準機率：{estimate}\\n"
+            f"評估方向：{factors[sport]}\\n"
+            "分析：未取得近期戰績、傷停與先發資訊，無證據判定任一方佔優；"
+            "以上僅為中立基準，不是依球隊實力計算的預測。\\n"
+            "⚠️ 離線假設性分析，未確認賽事存在，不可當作真實勝率或投注依據。")
+
 async def reply_for(text):
-    cmd = text.strip().replace(" ", "")
+    raw = text.strip()\n    cmd = raw.replace(" ", "")
     if cmd in ("你好", "嗨", "開始", "選單", "幫助", "help"):
         return MENU
     if cmd in SPORTS:
@@ -343,7 +373,7 @@ async def reply_for(text):
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "line-sports-ai", "version": "0.4.0"}
+    return {"status": "ok", "service": "line-sports-ai", "version": "0.5.0"}
 
 @app.post("/webhooks/line")
 async def webhook(request: Request, x_line_signature: str | None = Header(default=None)):
