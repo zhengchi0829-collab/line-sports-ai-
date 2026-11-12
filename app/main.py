@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 
-app = FastAPI(title="體育AI分析系統", version="0.6.14")
+app = FastAPI(title="體育AI分析系統", version="0.6.15")
 log = logging.getLogger("sports_bot")
 TZ = ZoneInfo("Asia/Taipei")
 MENU = ("歡迎使用【體育AI分析系統】！\n\n"
@@ -564,7 +564,7 @@ async def winner_team_details(sport, home, away):
                     for a in aliases for n in names if n), default=0)
     try:
         async with httpx.AsyncClient(timeout=4.0, follow_redirects=True) as client:
-            tasks = [client.get(base + "/teams", params={"limit": 100})]
+            tasks = [client.get(base + "/teams", params={"limit": 500})]
             if sport == "足球":
                 season = datetime.now(TZ).year
                 tasks += [client.get("https://api.openligadb.de/getmatchdata/bl1/" + str(y))
@@ -576,7 +576,7 @@ async def winner_team_details(sport, home, away):
                 candidates = [e.get("team", {}) for e in raw]
                 if candidates:
                     team = max(candidates, key=similarity)
-                    if similarity(team) >= 0.64 and team.get("id"):
+                    if similarity(team) >= 0.55 and team.get("id"):
                         team_id = str(team["id"])
                         roster_resp, schedule_resp = await asyncio.gather(
                             client.get(base + "/teams/" + team_id + "/roster"),
@@ -595,7 +595,7 @@ async def winner_team_details(sport, home, away):
                                     flat.extend(entry["items"])
                                 else:
                                     flat.append(entry)
-                            names = [p.get("displayName") or p.get("fullName") for p in flat if isinstance(p, dict)]
+                            names = [(p.get("athlete", p).get("displayName") or p.get("athlete", p).get("fullName")) for p in flat if isinstance(p, dict) and isinstance(p.get("athlete", p), dict)]
                             names = list(dict.fromkeys(n for n in names if n))
                             if names:
                                 players = winner + "｜球員名單：" + "、".join(names[:3])
@@ -732,12 +732,12 @@ async def ensure_persistent_rich_menu():
             existing = await client.get("https://api.line.me/v2/bot/richmenu/list", headers=headers)
             existing.raise_for_status()
             for menu in existing.json().get("richmenus", []):
-                if menu.get("name") == "Sports AI Persistent Menu v0.6.14":
+                if menu.get("name") == "Sports AI Persistent Menu v0.6.15":
                     rich_id = menu["richMenuId"]
                     break
             else:
                 payload = {"size": {"width": 1200, "height": 405},
-                           "selected": True, "name": "Sports AI Persistent Menu v0.6.14",
+                           "selected": True, "name": "Sports AI Persistent Menu v0.6.15",
                            "chatBarText": "⚽ 體育賽事快捷選單", "areas": areas}
                 created = await client.post("https://api.line.me/v2/bot/richmenu",
                                             headers=headers, json=payload)
@@ -774,7 +774,7 @@ async def setup_rich_menu_on_startup():
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "line-sports-ai", "version": "0.6.14"}
+    return {"status": "ok", "service": "line-sports-ai", "version": "0.6.15"}
 
 @app.post("/webhooks/line")
 async def webhook(request: Request, x_line_signature: str | None = Header(default=None)):
@@ -797,7 +797,7 @@ async def webhook(request: Request, x_line_signature: str | None = Header(defaul
             elif event.get("type") == "message" and event.get("message", {}).get("type") == "text":
                 try:
                     import asyncio
-                    message = await asyncio.wait_for(reply_for(event["message"].get("text", "")), timeout=7)
+                    message = await asyncio.wait_for(reply_for(event["message"].get("text", "")), timeout=11)
                 except Exception as exc:
                     log.error("Sports reply timed out or failed: %s", str(exc)[:160])
                     message = "【體育AI分析系統】目前賽事資料暫時無法取得，機器人已恢復回覆。請稍後再試或輸入「選單」。"
