@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.6.28"
+VERSION = "0.6.29"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -313,6 +313,17 @@ def notice(sport: str, snapshot: Snapshot) -> dict:
                         "contents": [button("\u91cd\u65b0\u67e5\u8a62", name), button("\u6a21\u64ec\u5c0d\u6230\u5206\u6790", demo, "#475569"), button("\u5176\u4ed6\u904b\u52d5", MENU, "#334155")]}}}
 
 
+BASKETBALL_LEAGUE_LABELS = {
+    "basketball": "NBA",
+    "basketball_ncaa": "NCAA",
+    "basketball_nbl": "NBL",
+}
+
+
+def basketball_league_label(sport: str) -> str:
+    return BASKETBALL_LEAGUE_LABELS.get(sport, "籃球")
+
+
 def fixture_cards(sport: str, snapshot: Snapshot, team_name, today=False, now=None) -> dict:
     now = now or datetime.now(TZ)
     games = select_games(snapshot.games, now, today)
@@ -340,19 +351,36 @@ def fixture_cards(sport: str, snapshot: Snapshot, team_name, today=False, now=No
         stamp = snapshot.fetched.strftime("%m/%d %H:%M") if snapshot.fetched else "-"
         bubbles.append({"type": "bubble", "size": "kilo",
             "header": {"type": "box", "layout": "vertical", "backgroundColor": "#0F172A", "paddingAll": "14px",
-                       "spacing": "xs", "contents": [text(g.league + " | " + ("籃球" if sport.startswith("basketball") else SPORTS[sport]), "xs", "#CBD5E1"),
+                       "spacing": "xs", "contents": [text((basketball_league_label(sport) if sport.startswith("basketball") else g.league) + " | " + ("籃球" if sport.startswith("basketball") else SPORTS[sport]), "xs", "#CBD5E1"),
                        text(label, "xl", "#FFFFFF", "bold"), text("\u53f0\u7063\u6642\u9593 | " + subtitle, "xs", "#CBD5E1")]},
             "body": {"type": "box", "layout": "vertical", "backgroundColor": "#F4F7FB", "paddingAll": "14px",
                      "spacing": "sm", "contents": [team_row(home, g.home_logo, "\u4e3b\u968a"), text("VS", color=accent, weight="bold"),
                      team_row(away, g.away_logo, "\u5ba2\u968a"), text(g.source + " | " + stamp +
                      (" | \u5feb\u53d6\u8cc7\u6599" if snapshot.stale else ""), "xxs", "#64748B")]},
             "footer": {"type": "box", "layout": "vertical", "paddingAll": "10px", "contents": [
-                button("\u7acb\u5373\u5206\u6790", f"\u5206\u6790籃球 {home} vs {away}" if sport.startswith("basketball") else f"\u5206\u6790{SPORTS[sport]} {home} vs {away}", accent)]}})
+                button("\u7acb\u5373\u5206\u6790", f"\u5206\u6790{basketball_league_label(sport)} {home} vs {away}" if sport.startswith("basketball") else f"\u5206\u6790{SPORTS[sport]} {home} vs {away}", accent)]}})
     return {"type": "flex", "altText": SPORTS[sport] + "\u8fd1\u671f\u8cfd\u4e8b\uff5c\u9ede\u9078\u5206\u6790",
             "quickReply": quick_menu(), "contents": {"type": "carousel", "contents": bubbles}}
 
 
 class Controller:
+    def tpbl_analysis_entry(self) -> dict:
+        return {"type": "flex", "altText": "TPBL 台灣職業籃球大聯盟｜對戰分析", "quickReply": quick_menu(),
+                "contents": {"type": "bubble", "size": "kilo",
+                    "header": {"type": "box", "layout": "vertical", "backgroundColor": "#4C1D95",
+                               "paddingAll": "16px", "contents": [
+                                   text("🏀 TPBL", "lg", "#FFFFFF", "bold"),
+                                   text("台灣職業籃球大聯盟", "sm", "#E9D5FF")]},
+                    "body": {"type": "box", "layout": "vertical", "spacing": "sm", "paddingAll": "14px",
+                             "contents": [
+                                 text("輸入：分析TPBL A隊 vs B隊", "sm"),
+                                 text("系統會使用籃球分析模型產生對戰重點與模擬推薦方向。", "xs", "#64748B"),
+                                 {"type": "button", "style": "primary", "height": "sm", "color": "#7C3AED",
+                                  "action": {"type": "uri", "label": "查看 TPBL 官方賽程",
+                                             "uri": "https://tpbl.basketball/schedule"}},
+                                 button("🏠 回籃球選單", "籃球", "#334155")
+                             ]}}}
+
     def __init__(self, ui, client):
         self.ui = ui
         self.fixtures = Fixtures(client)
@@ -392,20 +420,7 @@ class Controller:
         if compact == "籃球":
             return [league_menu()]
         if compact == "TPBL":
-            return [{"type": "flex", "altText": "TPBL 台灣職業籃球大聯盟", "quickReply": quick_menu(),
-                     "contents": {"type": "bubble", "size": "kilo",
-                         "header": {"type": "box", "layout": "vertical", "backgroundColor": "#4C1D95",
-                                    "paddingAll": "16px", "contents": [
-                                        text("🏀 TPBL", "lg", "#FFFFFF", "bold"),
-                                        text("台灣職業籃球大聯盟", "sm", "#E9D5FF")]},
-                         "body": {"type": "box", "layout": "vertical", "spacing": "sm", "paddingAll": "14px",
-                                  "contents": [
-                                      text("TPBL 已加入籃球入口。官方賽程資料源尚未接入即時卡片。", "sm"),
-                                      {"type": "button", "style": "primary", "height": "sm", "color": "#7C3AED",
-                                       "action": {"type": "uri", "label": "查看 TPBL 官方賽程",
-                                                  "uri": "https://tpbl.basketball/schedule"}},
-                                      button("🏠 回籃球選單", "籃球", "#334155")
-                                  ]}}}]
+            return [self.tpbl_analysis_entry()]
         if compact in KEYS:
             key = KEYS[compact]
             return [fixture_cards(key, await self.fixtures.get(key), self.ui.team_zh)]
@@ -413,18 +428,28 @@ class Controller:
             snapshots = await asyncio.gather(*(self.fixtures.get(key) for key in SPORTS), return_exceptions=True)
             return [fixture_cards(key, snap if isinstance(snap, Snapshot) else Snapshot(errors=["internal_error"]),
                                   self.ui.team_zh, today=compact == TODAY) for key, snap in zip(SPORTS, snapshots)]
-        match = re.match(r"^\s*\u5206\u6790\s*(\u8db3\u7403|\u7c43\u7403|\u68d2\u7403)\s*(.*)$", raw, re.S)
+        match = re.match(r"^\s*分析\s*(足球|籃球|棒球|NBA|NCAA|NBL|TPBL)\s*(.*)$", raw, re.S)
         if match:
             sport, matchup = match.groups()
+            league = sport if sport in ("NBA", "NCAA", "NBL", "TPBL") else None
+            base_sport = "籃球" if league else sport
             if not matchup:
-                key = KEYS[sport]
+                if league == "TPBL":
+                    return [self.tpbl_analysis_entry()]
+                key = {"NBA": "basketball", "NCAA": "basketball_ncaa", "NBL": "basketball_nbl"}.get(league) if league else KEYS[sport]
                 return [fixture_cards(key, await self.fixtures.get(key), self.ui.team_zh)]
             parts = re.split(r"\s*(?:\bvs\.?\b|\u5c0d\u6230|\u5c0d|\uff0d|\u2014)\s*", matchup, maxsplit=1, flags=re.I)
             if len(parts) == 2 and all(p.strip() for p in parts):
                 a, b = (p.strip().lstrip(".").strip()[:35] for p in parts)
-                history, players = (None, None) if demo else await self.team_details(sport, a, b)
-                card = self.ui.offline_analysis(sport, a + " vs " + b, history, players)
+                history, players = (None, None) if demo else await self.team_details(base_sport, a, b)
+                card = self.ui.offline_analysis(base_sport, a + " vs " + b, history, players)
                 if isinstance(card, dict):
+                    if league:
+                        card["contents"]["header"]["contents"][-1]["text"] = f"{league} · 對戰情境分析"
+                        buttons = card["contents"].get("footer", {}).get("contents", [])
+                        if buttons:
+                            buttons[0]["action"]["label"] = f"🔎 其他{league}賽事"
+                            buttons[0]["action"]["text"] = league
                     if demo:
                         card["contents"]["header"]["contents"].append(text("\u6a21\u64ec\u5c0d\u6230 | \u975e\u771f\u5be6\u8cfd\u7a0b", "xs", "#FDE68A"))
                     card["quickReply"] = quick_menu()
