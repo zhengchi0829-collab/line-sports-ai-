@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.6.24"
+VERSION = "0.6.25"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}\nKEYS.update({"NBA": "basketball", "MLB": "baseball"})
@@ -266,6 +266,22 @@ def quick_menu() -> dict:
                       for name in [*SPORTS.values(), "NBA", "MLB", TODAY, FUTURE, MENU]]}
 
 
+def league_menu() -> dict:
+    """Second-level league chooser opened from the basketball button."""
+    return {"type": "flex", "altText": "選擇 NBA 或 MLB", "quickReply": quick_menu(),
+            "contents": {"type": "bubble", "size": "kilo",
+                "header": {"type": "box", "layout": "vertical", "backgroundColor": "#0F172A",
+                           "paddingAll": "16px", "contents": [
+                               text("🏀 籃球入口", "lg", "#FFFFFF", "bold"),
+                               text("選擇要查看的聯盟", "sm", "#CBD5E1")]},
+                "body": {"type": "box", "layout": "vertical", "spacing": "sm", "paddingAll": "14px",
+                         "contents": [
+                             button("🏀 NBA", "NBA", "#C2410C"),
+                             button("⚾ MLB（棒球）", "MLB", "#7C3AED"),
+                             button("🏠 回主選單", MENU, "#334155")
+                         ]}}}
+
+
 def notice(sport: str, snapshot: Snapshot) -> dict:
     name = SPORTS.get(sport, "\u8cfd\u4e8b")
     failed = bool(snapshot.errors)
@@ -357,6 +373,8 @@ class Controller:
         if demo:
             raw = raw[2:]
         compact = re.sub(r"\s+", "", raw)
+        if compact == "籃球":
+            return [league_menu()]
         if compact in KEYS:
             key = KEYS[compact]
             return [fixture_cards(key, await self.fixtures.get(key), self.ui.team_zh)]
