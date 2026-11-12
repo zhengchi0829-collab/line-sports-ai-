@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.6.32"
+VERSION = "0.6.33"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -289,10 +289,10 @@ def league_menu() -> dict:
                                text("選擇要查看的聯盟", "sm", "#CBD5E1")]},
                 "body": {"type": "box", "layout": "vertical", "spacing": "sm", "paddingAll": "14px",
                          "contents": [
-                             button("🏀 NBA", "NBA", "#C2410C"),
-                             button("🏀 NCAA", "NCAA", "#B45309"),
-                             button("🏀 NBL", "NBL", "#0369A1"),
-                             button("🏀 TPBL", "TPBL", "#7C3AED"),
+                             button("🏀 NBA｜美國職籃", "NBA", "#C2410C"),
+                             button("🏀 NCAA｜美國大學籃球", "NCAA", "#B45309"),
+                             button("🏀 NBL｜澳洲職籃", "NBL", "#0369A1"),
+                             button("🏀 TPBL｜台灣職籃", "TPBL", "#7C3AED"),
                              button("🏠 回主選單", MENU, "#334155")
                          ]}}}
 
