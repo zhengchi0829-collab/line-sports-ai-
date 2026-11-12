@@ -18,11 +18,11 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.6.34"
+VERSION = "0.6.35"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
-KEYS.update({"NBA": "basketball", "NCAA": "basketball_ncaa", "NBL": "basketball_nbl", "MLB": "baseball"})
+KEYS.update({"NBA": "basketball", "NCAA": "basketball_ncaa", "NBL": "basketball_nbl", "MLB": "baseball", "NPB": "baseball_npb", "KBO": "baseball_kbo", "CPBL": "baseball_cpbl", "MiLB": "baseball_milb"})
 DEMO_PAIRS = {
     "soccer": ("\u62dc\u4ec1\u6155\u5c3c\u9ed1", "\u591a\u7279\u8499\u5fb7"),
     "basketball": ("\u6d1b\u6749\u78ef\u6e56\u4eba", "\u91d1\u5dde\u52c7\u58eb"),
@@ -71,10 +71,22 @@ def parse_feed(kind: str, data: Any) -> list[Game]:
             if "scoreboard" not in data:
                 raise ValueError("NBA scoreboard missing")
             rows = data["scoreboard"].get("games", [])
-    elif kind == "mlb":
+    elif kind in ("mlb", "npb", "kbo", "milb"):
         if not isinstance(data, dict) or "dates" not in data:
-            raise ValueError("MLB dates missing")
+            raise ValueError("Baseball dates missing")
         rows = [g for d in data["dates"] for g in d.get("games", [])]
+    elif kind == "cpbl":
+        rows = []
+        def walk(value):
+            if isinstance(value, dict):
+                if {"date", "home", "away"}.issubset(value):
+                    rows.append(value)
+                for child in value.values():
+                    walk(child)
+            elif isinstance(value, list):
+                for child in value:
+                    walk(child)
+        walk(data)
     else:
         if not isinstance(data, dict) or "events" not in data:
             raise ValueError("ESPN events missing")
@@ -106,17 +118,29 @@ def parse_feed(kind: str, data: Any) -> list[Game]:
                 item = Game(str(g["gameId"]), "basketball", "NBA", instant(raw), nba_name(h),
                             nba_name(a), nba_logo(h), nba_logo(a), "NBA",
                             "live" if status == 2 else "scheduled", not bool(g.get("isTimeTBD")))
-            elif kind == "mlb":
+            elif kind in ("mlb", "npb", "kbo", "milb"):
                 status = g.get("status", {})
                 state = status.get("abstractGameState")
                 if state not in ("Preview", "Live") or any(w in status.get("detailedState", "").lower()
                                                            for w in ("cancel", "postpon")):
                     continue
                 h, a = g["teams"]["home"]["team"], g["teams"]["away"]["team"]
-                item = Game(str(g["gamePk"]), "baseball", "MLB", instant(g["gameDate"]), h["name"], a["name"],
+                league_name = {"mlb": "MLB", "npb": "NPB", "kbo": "KBO", "milb": "MiLB"}[kind]
+                item = Game(str(g["gamePk"]), "baseball", league_name, instant(g["gameDate"]), h["name"], a["name"],
                             f"https://www.mlbstatic.com/team-logos/{h['id']}.svg",
-                            f"https://www.mlbstatic.com/team-logos/{a['id']}.svg", "MLB",
+                            f"https://www.mlbstatic.com/team-logos/{a['id']}.svg", "MLB Stats API",
                             "live" if state == "Live" else "scheduled", not status.get("startTimeTBD", False))
+            elif kind == "cpbl":
+                if str(g.get("status", "")).lower() in ("final", "postponed", "cancelled", "canceled"):
+                    continue
+                team_map = {"AAA": "味全龍", "AEO": "富邦悍將", "AKP": "台鋼雄鷹",
+                            "ACN": "中信兄弟", "AJL": "樂天桃猿", "ADD": "統一7-ELEVEn獅"}
+                raw_date = str(g["date"])
+                raw_time = str(g.get("time") or "18:35")
+                dt = datetime.strptime(raw_date + " " + raw_time, "%Y-%m-%d %H:%M").replace(tzinfo=TZ)
+                item = Game("cpbl-" + str(g.get("no", raw_date + raw_time)), "baseball", "CPBL", dt,
+                            team_map.get(str(g["home"]), str(g["home"])), team_map.get(str(g["away"]), str(g["away"])),
+                            "", "", "CPBL 2026 data", "scheduled", bool(g.get("time")))
             else:
                 comp = g["competitions"][0]
                 status = comp.get("status", g.get("status", {})).get("type", {})
@@ -203,9 +227,25 @@ class Fixtures:
                 ("nbl_next", "https://site.api.espn.com/apis/site/v2/sports/basketball/nbl/scoreboard",
                  {"dates": (now + timedelta(days=1)).strftime("%Y%m%d")}, "espn"),
             ]
-        return [("mlb", "https://statsapi.mlb.com/api/v1/schedule",
-                 {"sportId": 1, "startDate": (now - timedelta(days=1)).strftime("%Y-%m-%d"),
-                  "endDate": (now + timedelta(days=240)).strftime("%Y-%m-%d")}, "mlb")]
+        if sport == "baseball":
+            return [("mlb", "https://statsapi.mlb.com/api/v1/schedule",
+                     {"sportId": 1, "startDate": (now - timedelta(days=1)).strftime("%Y-%m-%d"),
+                      "endDate": (now + timedelta(days=240)).strftime("%Y-%m-%d")}, "mlb")]
+        if sport == "baseball_npb":
+            return [("npb", "https://statsapi.mlb.com/api/v1/schedule",
+                     {"sportId": 31, "startDate": (now - timedelta(days=1)).strftime("%Y-%m-%d"),
+                      "endDate": (now + timedelta(days=180)).strftime("%Y-%m-%d")}, "npb")]
+        if sport == "baseball_kbo":
+            return [("kbo", "https://statsapi.mlb.com/api/v1/schedule",
+                     {"sportId": 32, "startDate": (now - timedelta(days=1)).strftime("%Y-%m-%d"),
+                      "endDate": (now + timedelta(days=180)).strftime("%Y-%m-%d")}, "kbo")]
+        if sport == "baseball_milb":
+            return [("milb", "https://statsapi.mlb.com/api/v1/schedule",
+                     {"sportId": 21, "startDate": (now - timedelta(days=1)).strftime("%Y-%m-%d"),
+                      "endDate": (now + timedelta(days=180)).strftime("%Y-%m-%d")}, "milb")]
+        if sport == "baseball_cpbl":
+            return [("cpbl", "https://raw.githubusercontent.com/pochih/cpbl2026/main/cpbl_data.json", {}, "cpbl")]
+        return []
 
     async def refresh(self, sport: str) -> Snapshot:
         now = datetime.now(TZ)
@@ -343,13 +383,27 @@ def basketball_league_label(sport: str) -> str:
     return BASKETBALL_LEAGUE_LABELS.get(sport, "籃球")
 
 
+BASEBALL_LEAGUE_LABELS = {
+    "baseball": "MLB",
+    "baseball_npb": "NPB",
+    "baseball_kbo": "KBO",
+    "baseball_cpbl": "CPBL",
+    "baseball_milb": "MiLB",
+}
+
+
+def baseball_league_label(sport: str) -> str:
+    return BASEBALL_LEAGUE_LABELS.get(sport, "棒球")
+
+
 def fixture_cards(sport: str, snapshot: Snapshot, team_name, today=False, now=None) -> dict:
     now = now or datetime.now(TZ)
     games = select_games(snapshot.games, now, today)
     if not games:
-        return notice("basketball" if sport.startswith("basketball_") else sport, snapshot)
+        return notice("basketball" if sport.startswith("basketball_") else ("baseball" if sport.startswith("baseball_") else sport), snapshot)
     colors = {"soccer": "#0F766E", "basketball": "#C2410C", "basketball_ncaa": "#B45309",
-              "basketball_nbl": "#0369A1", "baseball": "#4F46E5"}
+              "basketball_nbl": "#0369A1", "baseball": "#4F46E5", "baseball_npb": "#B91C1C",
+              "baseball_kbo": "#0369A1", "baseball_cpbl": "#047857", "baseball_milb": "#92400E"}
     accent = colors[sport]
     bubbles = []
     for g in games:
@@ -370,15 +424,15 @@ def fixture_cards(sport: str, snapshot: Snapshot, team_name, today=False, now=No
         stamp = snapshot.fetched.strftime("%m/%d %H:%M") if snapshot.fetched else "-"
         bubbles.append({"type": "bubble", "size": "kilo",
             "header": {"type": "box", "layout": "vertical", "backgroundColor": "#0F172A", "paddingAll": "14px",
-                       "spacing": "xs", "contents": [text((basketball_league_label(sport) if sport.startswith("basketball") else g.league) + " | " + ("籃球" if sport.startswith("basketball") else SPORTS[sport]), "xs", "#CBD5E1"),
+                       "spacing": "xs", "contents": [text((basketball_league_label(sport) if sport.startswith("basketball") else (baseball_league_label(sport) if sport.startswith("baseball") else g.league)) + " | " + ("籃球" if sport.startswith("basketball") else ("棒球" if sport.startswith("baseball") else SPORTS[sport])), "xs", "#CBD5E1"),
                        text(label, "xl", "#FFFFFF", "bold"), text("\u53f0\u7063\u6642\u9593 | " + subtitle, "xs", "#CBD5E1")]},
             "body": {"type": "box", "layout": "vertical", "backgroundColor": "#F4F7FB", "paddingAll": "14px",
                      "spacing": "sm", "contents": [team_row(home, g.home_logo, "\u4e3b\u968a"), text("VS", color=accent, weight="bold"),
                      team_row(away, g.away_logo, "\u5ba2\u968a"), text(g.source + " | " + stamp +
                      (" | \u5feb\u53d6\u8cc7\u6599" if snapshot.stale else ""), "xxs", "#64748B")]},
             "footer": {"type": "box", "layout": "vertical", "paddingAll": "10px", "contents": [
-                button("\u7acb\u5373\u5206\u6790", f"\u5206\u6790{basketball_league_label(sport)} {home} vs {away}" if sport.startswith("basketball") else f"\u5206\u6790{SPORTS[sport]} {home} vs {away}", accent)]}})
-    return {"type": "flex", "altText": (basketball_league_label(sport) if sport.startswith("basketball") else SPORTS[sport]) + "\u8fd1\u671f\u8cfd\u4e8b\uff5c\u9ede\u9078\u5206\u6790",
+                button("\u7acb\u5373\u5206\u6790", (f"\u5206\u6790{basketball_league_label(sport)} {home} vs {away}" if sport.startswith("basketball") else (f"\u5206\u6790{baseball_league_label(sport)} {home} vs {away}" if sport.startswith("baseball") else f"\u5206\u6790{SPORTS[sport]} {home} vs {away}")), accent)]}})
+    return {"type": "flex", "altText": (basketball_league_label(sport) if sport.startswith("basketball") else (baseball_league_label(sport) if sport.startswith("baseball") else SPORTS[sport])) + "\u8fd1\u671f\u8cfd\u4e8b\uff5c\u9ede\u9078\u5206\u6790",
             "quickReply": quick_menu(), "contents": {"type": "carousel", "contents": bubbles}}
 
 
@@ -454,14 +508,6 @@ class Controller:
             return [league_menu()]
         if compact == "棒球":
             return [baseball_menu()]
-        if compact == "NPB":
-            return [self.baseball_league_entry("NPB", "日本職業棒球")]
-        if compact == "KBO":
-            return [self.baseball_league_entry("KBO", "韓國職業棒球")]
-        if compact == "CPBL":
-            return [self.baseball_league_entry("CPBL", "中華職業棒球大聯盟")]
-        if compact == "MiLB":
-            return [self.baseball_league_entry("MiLB", "美國職棒小聯盟")]
         if compact == "TPBL":
             return [self.tpbl_analysis_entry()]
         if compact in KEYS:
@@ -481,12 +527,9 @@ class Controller:
             if not matchup:
                 if league == "TPBL":
                     return [self.tpbl_analysis_entry()]
-                if league in ("NPB", "KBO", "CPBL", "MiLB"):
-                    names = {"NPB": "日本職業棒球", "KBO": "韓國職業棒球",
-                             "CPBL": "中華職業棒球大聯盟", "MiLB": "美國職棒小聯盟"}
-                    return [self.baseball_league_entry(league, names[league])]
                 key = {"NBA": "basketball", "NCAA": "basketball_ncaa", "NBL": "basketball_nbl",
-                       "MLB": "baseball"}.get(league) if league else KEYS[sport]
+                       "MLB": "baseball", "NPB": "baseball_npb", "KBO": "baseball_kbo",
+                       "CPBL": "baseball_cpbl", "MiLB": "baseball_milb"}.get(league) if league else KEYS[sport]
                 return [fixture_cards(key, await self.fixtures.get(key), self.ui.team_zh)]
             parts = re.split(r"\s*(?:\bvs\.?\b|\u5c0d\u6230|\u5c0d|\uff0d|\u2014)\s*", matchup, maxsplit=1, flags=re.I)
             if len(parts) == 2 and all(p.strip() for p in parts):
