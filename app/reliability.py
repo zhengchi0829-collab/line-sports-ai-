@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.6.29"
+VERSION = "0.6.30"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -276,7 +276,7 @@ def button(label: str, command: str, color="#0F766E") -> dict:
 
 def quick_menu() -> dict:
     return {"items": [{"type": "action", "action": {"type": "message", "label": name, "text": name}}
-                      for name in [*SPORTS.values(), "NBA", "NCAA", "NBL", "TPBL", TODAY, FUTURE, MENU]]}
+                      for name in [*SPORTS.values(), TODAY, FUTURE, MENU]]}
 
 
 def league_menu() -> dict:
