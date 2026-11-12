@@ -13,12 +13,12 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urljoin
 from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.6.38"
+VERSION = "0.6.39"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -138,9 +138,13 @@ def parse_feed(kind: str, data: Any) -> list[Game]:
                 raw_date = str(g["date"])
                 raw_time = str(g.get("time") or "18:35")
                 dt = datetime.strptime(raw_date + " " + raw_time, "%Y-%m-%d %H:%M").replace(tzinfo=TZ)
+                home_name = team_map.get(str(g["home"]), str(g["home"]))
+                away_name = team_map.get(str(g["away"]), str(g["away"]))
                 item = Game("cpbl-" + str(g.get("no", raw_date + raw_time)), "baseball", "CPBL", dt,
-                            team_map.get(str(g["home"]), str(g["home"])), team_map.get(str(g["away"]), str(g["away"])),
-                            "", "", "CPBL 2026 data", "scheduled", bool(g.get("time")))
+                            home_name, away_name,
+                            fallback_team_logo("baseball_cpbl", home_name),
+                            fallback_team_logo("baseball_cpbl", away_name),
+                            "CPBL 2026 data", "scheduled", bool(g.get("time")))
             else:
                 comp = g["competitions"][0]
                 status = comp.get("status", g.get("status", {})).get("type", {})
@@ -206,8 +210,10 @@ class Fixtures:
                     dt = datetime.strptime(f"{y}-{month}-{day} {hm}", "%Y-%m-%d %H:%M").replace(tzinfo=TZ)
                     # Official page text is away first, home second.
                     away, home = teams[0], teams[1]
+                    away_logo = nearby_html_image(html, away, url)
+                    home_logo = nearby_html_image(html, home, url)
                     game = Game("tpbl-" + (game_no.group(1) if game_no else url.rsplit("/",1)[-1]),
-                                "basketball", "TPBL", dt, home, away, "", "",
+                                "basketball", "TPBL", dt, home, away, home_logo, away_logo,
                                 "TPBL 官方", "scheduled", True)
                     return [game], None
                 return parse_feed(kind, response.json()), None
@@ -431,6 +437,53 @@ def baseball_league_label(sport: str) -> str:
     return BASEBALL_LEAGUE_LABELS.get(sport, "棒球")
 
 
+CPBL_TEAM_DOMAINS = {
+    "味全龍": "wdragons.com",
+    "富邦悍將": "fubonguardians.com",
+    "台鋼雄鷹": "tsghawks.com",
+    "中信兄弟": "brothers.tw",
+    "樂天桃猿": "monkeys.rakuten.com.tw",
+    "統一7-ELEVEn獅": "uni-lions.com.tw",
+    "統一獅": "uni-lions.com.tw",
+}
+
+
+def fallback_team_logo(sport: str, raw_name: str, current: str = "") -> str:
+    """Return a stable logo when the fixture provider did not include one."""
+    if isinstance(current, str) and current.startswith("https://"):
+        return current
+    name = str(raw_name).strip()
+    if sport == "baseball_cpbl":
+        domain = CPBL_TEAM_DOMAINS.get(name)
+        if domain:
+            # Official team-site favicon. Small but stable and branded; used only
+            # when the schedule source has no direct team-logo field.
+            return "https://www.google.com/s2/favicons?domain=" + domain + "&sz=128"
+    return ""
+
+
+def nearby_html_image(html: str, team_name: str, base_url: str) -> str:
+    """Find an official team image near the team name in a TPBL game page."""
+    if not html or not team_name:
+        return ""
+    pos = html.find(team_name)
+    if pos < 0:
+        return ""
+    start = max(0, pos - 1600)
+    end = min(len(html), pos + 1600)
+    chunk = html[start:end]
+    candidates = re.findall(
+        r'(?:src|data-src|data-original)=["\']([^"\']+)["\']',
+        chunk, re.I
+    )
+    # Prefer image-like assets and skip generic tracking/icons.
+    for src in reversed(candidates):
+        low = src.lower()
+        if any(ext in low for ext in (".png", ".svg", ".webp", ".jpg", ".jpeg")):
+            return urljoin(base_url, src)
+    return ""
+
+
 def fixture_cards(sport: str, snapshot: Snapshot, team_name, today=False, now=None) -> dict:
     now = now or datetime.now(TZ)
     games = select_games(snapshot.games, now, today)
@@ -443,6 +496,8 @@ def fixture_cards(sport: str, snapshot: Snapshot, team_name, today=False, now=No
     bubbles = []
     for g in games:
         home, away = team_name(g.home), team_name(g.away)
+        home_logo = fallback_team_logo(sport, g.home, g.home_logo)
+        away_logo = fallback_team_logo(sport, g.away, g.away_logo)
         label = g.start.strftime("%m/%d %H:%M") if g.time_known else g.start.strftime("%m/%d") + " \u6642\u9593\u5f85\u5b9a"
         subtitle = "\u9032\u884c\u4e2d" if g.state == "live" else "\u5373\u5c07\u958b\u8cfd"
         if today and g.start.date() != now.date():
@@ -453,6 +508,12 @@ def fixture_cards(sport: str, snapshot: Snapshot, team_name, today=False, now=No
                 image = "https://wsrv.nl/?url=" + quote(logo, safe="") + "&w=128&h=128&fit=contain&output=png"
                 content.append({"type": "image", "url": image, "size": "48px", "flex": 0,
                                 "aspectMode": "fit", "aspectRatio": "1:1"})
+            else:
+                # Never leave the logo slot visually blank.
+                content.append({"type": "box", "layout": "vertical", "width": "48px", "height": "48px",
+                                "backgroundColor": "#E2E8F0", "cornerRadius": "24px",
+                                "justifyContent": "center", "alignItems": "center",
+                                "contents": [text((str(name).strip() or "?")[0], "sm", "#334155", "bold")]})
             content.append({"type": "box", "layout": "vertical", "flex": 1,
                             "contents": [text(role, "xxs", "#64748B"), text(name, "md", weight="bold")]})
             return {"type": "box", "layout": "horizontal", "spacing": "sm", "alignItems": "center", "contents": content}
@@ -462,8 +523,8 @@ def fixture_cards(sport: str, snapshot: Snapshot, team_name, today=False, now=No
                        "spacing": "xs", "contents": [text((basketball_league_label(sport) if sport.startswith("basketball") else (baseball_league_label(sport) if sport.startswith("baseball") else g.league)) + " | " + ("籃球" if sport.startswith("basketball") else ("棒球" if sport.startswith("baseball") else SPORTS[sport])), "xs", "#CBD5E1"),
                        text(label, "xl", "#FFFFFF", "bold"), text("\u53f0\u7063\u6642\u9593 | " + subtitle, "xs", "#CBD5E1")]},
             "body": {"type": "box", "layout": "vertical", "backgroundColor": "#F4F7FB", "paddingAll": "14px",
-                     "spacing": "sm", "contents": [team_row(home, g.home_logo, "\u4e3b\u968a"), text("VS", color=accent, weight="bold"),
-                     team_row(away, g.away_logo, "\u5ba2\u968a"), text(g.source + " | " + stamp +
+                     "spacing": "sm", "contents": [team_row(home, home_logo, "\u4e3b\u968a"), text("VS", color=accent, weight="bold"),
+                     team_row(away, away_logo, "\u5ba2\u968a"), text(g.source + " | " + stamp +
                      (" | \u5feb\u53d6\u8cc7\u6599" if snapshot.stale else ""), "xxs", "#64748B")]},
             "footer": {"type": "box", "layout": "vertical", "paddingAll": "10px", "contents": [
                 button("\u7acb\u5373\u5206\u6790", (f"\u5206\u6790{basketball_league_label(sport)} {home} vs {away}" if sport.startswith("basketball") else (f"\u5206\u6790{baseball_league_label(sport)} {home} vs {away}" if sport.startswith("baseball") else f"\u5206\u6790{SPORTS[sport]} {home} vs {away}")), accent)]}})
