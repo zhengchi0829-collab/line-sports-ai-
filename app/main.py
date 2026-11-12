@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 
-app = FastAPI(title="體育AI分析系統", version="0.6.16")
+app = FastAPI(title="體育AI分析系統", version="0.6.17")
 log = logging.getLogger("sports_bot")
 TZ = ZoneInfo("Asia/Taipei")
 MENU = ("歡迎使用【體育AI分析系統】！\n\n"
@@ -543,6 +543,40 @@ async def upcoming_match_cards(sport):
             "contents": {"type": "carousel", "contents": bubbles}}
 
 
+# Verified team data cache: reuse successful lookups instead of blocking each LINE reply.
+TEAM_DATA_CACHE = {}
+TEAM_DATA_TASKS = {}
+
+async def cached_team_details(sport, home, away):
+    import asyncio
+    import time
+    key = (sport, home, away)
+    cached = TEAM_DATA_CACHE.get(key)
+    now = time.monotonic()
+    if cached and now - cached[0] < 1800:
+        return cached[1], cached[2]
+    task = TEAM_DATA_TASKS.get(key)
+    if task is None or task.done():
+        task = asyncio.create_task(winner_team_details(sport, home, away))
+        TEAM_DATA_TASKS[key] = task
+        def store_result(done):
+            if TEAM_DATA_TASKS.get(key) is done:
+                TEAM_DATA_TASKS.pop(key, None)
+            try:
+                history, players = done.result()
+                if history or players:
+                    previous = TEAM_DATA_CACHE.get(key)
+                    TEAM_DATA_CACHE[key] = (time.monotonic(), history or (previous[1] if previous else None),
+                                             players or (previous[2] if previous else None))
+            except Exception as exc:
+                log.warning("Team refresh failed: %s", str(exc)[:120])
+        task.add_done_callback(store_result)
+    try:
+        return await asyncio.wait_for(asyncio.shield(task), timeout=3.0)
+    except asyncio.TimeoutError:
+        return (cached[1], cached[2]) if cached else (None, None)
+
+
 async def winner_team_details(sport, home, away):
     """Retrieve verified recent results and roster for the recommended team."""
     import asyncio
@@ -680,14 +714,14 @@ async def reply_for(text):
             if rest.startswith(sport):
                 matchup = rest[len(sport):].strip()
                 import re
-                parts = re.split(r"\\s*(?:vs\\.?|對戰|對|－|—)\\s*", matchup, maxsplit=1, flags=re.IGNORECASE)
+                parts = re.split(r"\s*(?:vs\.?|對戰|對|－|—)\s*", matchup, maxsplit=1, flags=re.IGNORECASE)
                 if len(parts) != 2 or not all(x.strip() for x in parts):
                     return offline_analysis(sport, matchup)
                 import asyncio
                 try:
                     history, players = await asyncio.wait_for(
-                        winner_team_details(sport, parts[0].strip()[:35], parts[1].strip()[:35]),
-                        timeout=2.0)
+                        cached_team_details(sport, parts[0].strip()[:35], parts[1].strip()[:35]),
+                        timeout=3.4)
                 except (asyncio.TimeoutError, httpx.HTTPError) as exc:
                     log.info("Team details exceeded quick response budget: %s", type(exc).__name__)
                     history, players = None, None
@@ -739,12 +773,12 @@ async def ensure_persistent_rich_menu():
             existing = await client.get("https://api.line.me/v2/bot/richmenu/list", headers=headers)
             existing.raise_for_status()
             for menu in existing.json().get("richmenus", []):
-                if menu.get("name") == "Sports AI Persistent Menu v0.6.16":
+                if menu.get("name") == "Sports AI Persistent Menu v0.6.17":
                     rich_id = menu["richMenuId"]
                     break
             else:
                 payload = {"size": {"width": 1200, "height": 405},
-                           "selected": True, "name": "Sports AI Persistent Menu v0.6.16",
+                           "selected": True, "name": "Sports AI Persistent Menu v0.6.17",
                            "chatBarText": "⚽ 體育賽事快捷選單", "areas": areas}
                 created = await client.post("https://api.line.me/v2/bot/richmenu",
                                             headers=headers, json=payload)
@@ -781,7 +815,7 @@ async def setup_rich_menu_on_startup():
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "line-sports-ai", "version": "0.6.16"}
+    return {"status": "ok", "service": "line-sports-ai", "version": "0.6.17"}
 
 @app.post("/webhooks/line")
 async def webhook(request: Request, x_line_signature: str | None = Header(default=None)):
@@ -804,7 +838,7 @@ async def webhook(request: Request, x_line_signature: str | None = Header(defaul
             elif event.get("type") == "message" and event.get("message", {}).get("type") == "text":
                 try:
                     import asyncio
-                    message = await asyncio.wait_for(reply_for(event["message"].get("text", "")), timeout=5)
+                    message = await asyncio.wait_for(reply_for(event["message"].get("text", "")), timeout=6)
                 except Exception as exc:
                     log.error("Sports reply timed out or failed: %s", str(exc)[:160])
                     message = "【體育AI分析系統】目前賽事資料暫時無法取得，機器人已恢復回覆。請稍後再試或輸入「選單」。"
