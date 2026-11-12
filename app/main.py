@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 
-app = FastAPI(title="體育AI分析系統", version="0.6.8")
+app = FastAPI(title="體育AI分析系統", version="0.6.9")
 log = logging.getLogger("sports_bot")
 TZ = ZoneInfo("Asia/Taipei")
 MENU = ("歡迎使用【體育AI分析系統】！\n\n"
@@ -550,10 +550,84 @@ async def reply_for(text):
         return "【會員中心】\n目前賽事查詢與公開數據分析免費使用。\n尚未開放註冊、登入、付費或訂閱。"
     return MENU
 
+async def ensure_persistent_rich_menu():
+    """Install a persistent LINE rich menu once, reusing the menu across restarts."""
+    token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "")
+    if not token:
+        log.warning("Rich menu skipped: LINE access token missing")
+        return
+    import io
+    from PIL import Image, ImageDraw, ImageFont
+    from fastapi.concurrency import run_in_threadpool
+
+    def render_menu():
+        image = Image.new("RGB", (1200, 810), "#0B1220")
+        draw = ImageDraw.Draw(image)
+        try:
+            font = ImageFont.truetype("DejaVuSans-Bold.ttf", 51)
+            small = ImageFont.truetype("DejaVuSans.ttf", 24)
+        except OSError:
+            font = ImageFont.load_default()
+            small = font
+        tiles = [("SOCCER", "#0F766E"), ("BASKETBALL", "#C2410C"),
+                 ("BASEBALL", "#4F46E5"), ("TODAY", "#1D4ED8"),
+                 ("UPCOMING", "#334155"), ("MENU", "#334155")]
+        for index, (label, color) in enumerate(tiles):
+            x = (index % 3) * 400
+            y = (index // 3) * 405
+            draw.rounded_rectangle((x + 10, y + 10, x + 390, y + 395), radius=26, fill=color)
+            bbox = draw.textbbox((0, 0), label, font=font)
+            draw.text((x + (400 - (bbox[2] - bbox[0])) / 2, y + 175),
+                      label, font=font, fill="white")
+        out = io.BytesIO()
+        image.save(out, format="PNG")
+        return out.getvalue()
+
+    labels = ["足球", "籃球", "棒球", "今日賽事", "未來賽事", "選單"]
+    areas = [{"bounds": {"x": (i % 3) * 400, "y": (i // 3) * 405,
+                         "width": 400, "height": 405},
+              "action": {"type": "message", "label": label, "text": label}}
+             for i, label in enumerate(labels)]
+    headers = {"Authorization": f"Bearer {token}"}
+    async with httpx.AsyncClient(timeout=15) as client:
+        try:
+            existing = await client.get("https://api.line.me/v2/bot/richmenu/list", headers=headers)
+            existing.raise_for_status()
+            for menu in existing.json().get("richmenus", []):
+                if menu.get("name") == "Sports AI Persistent Menu v0.6.9":
+                    rich_id = menu["richMenuId"]
+                    break
+            else:
+                payload = {"size": {"width": 1200, "height": 810},
+                           "selected": True, "name": "Sports AI Persistent Menu v0.6.9",
+                           "chatBarText": "⚽ 體育賽事快捷選單", "areas": areas}
+                created = await client.post("https://api.line.me/v2/bot/richmenu",
+                                            headers=headers, json=payload)
+                created.raise_for_status()
+                rich_id = created.json()["richMenuId"]
+                png = await run_in_threadpool(render_menu)
+                upload = await client.post(
+                    f"https://api-data.line.me/v2/bot/richmenu/{rich_id}/content",
+                    headers={**headers, "Content-Type": "image/png"}, content=png)
+                upload.raise_for_status()
+            set_default = await client.post(
+                f"https://api.line.me/v2/bot/user/all/richmenu/{rich_id}", headers=headers)
+            set_default.raise_for_status()
+            log.info("Persistent rich menu configured: %s", rich_id)
+        except (httpx.HTTPError, ValueError, KeyError) as exc:
+            log.error("Persistent rich menu setup failed: %s", str(exc)[:300])
+
+
+@app.on_event("startup")
+async def setup_rich_menu_on_startup():
+    import asyncio
+    asyncio.create_task(ensure_persistent_rich_menu())
+
+
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "line-sports-ai", "version": "0.6.8"}
+    return {"status": "ok", "service": "line-sports-ai", "version": "0.6.9"}
 
 @app.post("/webhooks/line")
 async def webhook(request: Request, x_line_signature: str | None = Header(default=None)):
