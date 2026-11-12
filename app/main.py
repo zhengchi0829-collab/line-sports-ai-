@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 
-app = FastAPI(title="體育AI分析系統", version="0.6.1")
+app = FastAPI(title="體育AI分析系統", version="0.6.2")
 log = logging.getLogger("sports_bot")
 TZ = ZoneInfo("Asia/Taipei")
 MENU = ("歡迎使用【體育AI分析系統】！\n\n"
@@ -345,11 +345,18 @@ def offline_analysis(sport, matchup=None):
         focus = "① 先發投手與近期投球負荷\n② 牛棚可用性\n③ 打線、守備與球場條件"
         scenarios = f"若{home}先發投手壓制成功，主隊較有利；若{away}提早攻破先發，客隊機會提高。"
         result = "暫無足夠依據判斷優勢方；先發投手資訊最重要。"
+    if sport == "足球":
+        suggestion = ("獨贏：目前沒有可驗證的強弱差距，暫不指定哪隊。\\n"
+                      "大小球：小 0.5 代表全場必須 0 球才成立；缺少進球數據，不建議直接選小 0.5。")
+    else:
+        suggestion = ("獨贏：缺乏近期戰績與先發資訊，暫無高勝率方。\\n"
+                      "大小分：沒有近期得分與盤口資料，暫不提供大小分方向。")
     return (f"{icons[sport]}【{sport}對戰分析】\n{home} VS {away}\n\n"
             f"📊 無資料基準：{odds}\n\n"
             f"🔍 分析重點：\n{focus}\n\n"
             f"📈 比賽情境：{scenarios}\n\n"
             f"🎯 分析結論：{result}\n\n"
+            f"💡 盤口參考建議：\n{suggestion}\n\n"
             "⚠️ 離線情境推演；未取得即時數據，百分比是中立起始值，不是真實預測勝率。")
 
 TEAM_ZH = {
@@ -502,7 +509,7 @@ async def reply_for(text):
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "line-sports-ai", "version": "0.6.1"}
+    return {"status": "ok", "service": "line-sports-ai", "version": "0.6.2"}
 
 @app.post("/webhooks/line")
 async def webhook(request: Request, x_line_signature: str | None = Header(default=None)):
