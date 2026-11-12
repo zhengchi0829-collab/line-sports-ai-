@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 
-app = FastAPI(title="體育AI分析系統", version="0.6.9")
+app = FastAPI(title="體育AI分析系統", version="0.6.10")
 log = logging.getLogger("sports_bot")
 TZ = ZoneInfo("Asia/Taipei")
 MENU = ("歡迎使用【體育AI分析系統】！\n\n"
@@ -360,34 +360,34 @@ def offline_analysis(sport, matchup=None):
         return {"type": "text", "text": value, "size": size, "color": color, "weight": weight, "wrap": True}
     def panel(heading, content, background="#F1F5F9"):
         return {"type": "box", "layout": "vertical", "backgroundColor": background,
-                "cornerRadius": "12px", "paddingAll": "16px", "spacing": "sm",
+                "cornerRadius": "12px", "paddingAll": "11px", "spacing": "xs",
                 "contents": [txt(heading, "sm", accent, "bold"), txt(content)]}
     return {"type": "flex", "altText": f"{sport}對戰分析｜{home} VS {away}",
-            "contents": {"type": "bubble", "size": "mega",
+            "contents": {"type": "bubble", "size": "kilo",
                 "header": {"type": "box", "layout": "vertical", "backgroundColor": "#0F172A",
-                    "paddingAll": "22px", "spacing": "sm", "contents": [
+                    "paddingAll": "14px", "spacing": "xs", "contents": [
                         txt(f"{icons[sport]}  MATCH ANALYSIS", "xs", "#93C5FD", "bold"),
-                        txt(f"{home}  VS  {away}", "lg", "#FFFFFF", "bold"),
+                        txt(f"{home}  VS  {away}", "md", "#FFFFFF", "bold"),
                         txt(f"{sport} · 對戰情境分析", "xs", "#CBD5E1")]},
                 "body": {"type": "box", "layout": "vertical", "backgroundColor": "#FFFFFF",
-                    "paddingAll": "18px", "spacing": "md", "contents": [
+                    "paddingAll": "12px", "spacing": "sm", "contents": [
                         panel("🔍 分析重點", focus),
                         panel("👤 球員觀察", scenarios),
                         panel("🎯 球員關鍵看點", result),
                         {"type": "box", "layout": "vertical", "backgroundColor": "#0F172A",
-                         "cornerRadius": "14px", "paddingAll": "18px", "spacing": "md",
+                         "cornerRadius": "12px", "paddingAll": "13px", "spacing": "sm",
                          "contents": [
                              txt("✦ 推薦方向", "md", "#FDE68A", "bold"),
-                             txt(f"🏆 獨贏  {winner}", "lg", "#FFFFFF", "bold"),
+                             txt(f"🏆 獨贏  {winner}", "md", "#FFFFFF", "bold"),
                              {"type": "separator", "color": "#475569"},
-                             txt(f"📊 大小分  {total}", "lg", "#FFFFFF", "bold"),
+                             txt(f"📊 大小分  {total}", "md", "#FFFFFF", "bold"),
                              txt("模擬方向 · 非即時盤口", "xxs", "#CBD5E1")
                          ]}
                     ]},
                 "footer": {"type": "box", "layout": "vertical", "backgroundColor": "#FFFFFF",
-                    "paddingAll": "16px", "contents": [
+                    "paddingAll": "10px", "contents": [
                         {"type": "button", "style": "primary", "color": accent,
-                         "height": "md", "action": {"type": "message",
+                         "height": "sm", "action": {"type": "message",
                              "label": "🔎 分析其他隊伍", "text": sport}}
                     ]}
             }}
@@ -594,12 +594,12 @@ async def ensure_persistent_rich_menu():
             existing = await client.get("https://api.line.me/v2/bot/richmenu/list", headers=headers)
             existing.raise_for_status()
             for menu in existing.json().get("richmenus", []):
-                if menu.get("name") == "Sports AI Persistent Menu v0.6.9":
+                if menu.get("name") == "Sports AI Persistent Menu v0.6.10":
                     rich_id = menu["richMenuId"]
                     break
             else:
                 payload = {"size": {"width": 1200, "height": 810},
-                           "selected": True, "name": "Sports AI Persistent Menu v0.6.9",
+                           "selected": True, "name": "Sports AI Persistent Menu v0.6.10",
                            "chatBarText": "⚽ 體育賽事快捷選單", "areas": areas}
                 created = await client.post("https://api.line.me/v2/bot/richmenu",
                                             headers=headers, json=payload)
@@ -627,7 +627,7 @@ async def setup_rich_menu_on_startup():
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "line-sports-ai", "version": "0.6.9"}
+    return {"status": "ok", "service": "line-sports-ai", "version": "0.6.10"}
 
 @app.post("/webhooks/line")
 async def webhook(request: Request, x_line_signature: str | None = Header(default=None)):
