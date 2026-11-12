@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 
-app = FastAPI(title="體育AI分析系統", version="0.6.21")
+app = FastAPI(title="體育AI分析系統", version="0.6.22")
 log = logging.getLogger("sports_bot")
 TZ = ZoneInfo("Asia/Taipei")
 MENU = ("歡迎使用【體育AI分析系統】！\n\n"
@@ -359,7 +359,12 @@ def offline_analysis(sport, matchup=None, team_history=None, star_players=None):
     elif sport == "籃球":
         total = "小 220.5 分" if pick % 3 else "大 220.5 分"
     else:
-        total = "小 8.5 分" if pick % 3 else "大 8.5 分"
+        # Vary baseball totals by matchup instead of pinning every card to 8.5.
+        # This remains a stable simulated direction, not a live sportsbook line.
+        baseball_lines = ("6.5", "7.0", "7.5", "8.0", "8.5", "9.0", "9.5", "10.0", "10.5", "11.0")
+        line = baseball_lines[(pick >> 4) % len(baseball_lines)]
+        direction = "大" if ((pick >> 2) & 1) else "小"
+        total = f"{direction} {line} 分"
     # Always show both sections. Distinguish verified facts from scouting criteria.
     if team_history:
         focus = team_history
