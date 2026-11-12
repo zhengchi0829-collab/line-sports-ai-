@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 
-app = FastAPI(title="體育AI分析系統", version="0.6.7")
+app = FastAPI(title="體育AI分析系統", version="0.6.8")
 log = logging.getLogger("sports_bot")
 TZ = ZoneInfo("Asia/Taipei")
 MENU = ("歡迎使用【體育AI分析系統】！\n\n"
@@ -490,7 +490,12 @@ async def upcoming_match_cards(sport):
         def team_row(name, logo):
             items = []
             if isinstance(logo, str) and logo.startswith("https://"):
-                items.append({"type": "image", "url": logo, "size": "sm", "aspectMode": "fit", "aspectRatio": "1:1", "flex": 0})
+                # LINE Flex does not reliably render SVG logos. Convert source logos
+                # to small PNGs via a public image CDN before LINE fetches them.
+                from urllib.parse import quote
+                png_url = "https://wsrv.nl/?url=" + quote(logo, safe="") + "&w=128&h=128&fit=contain&output=png"
+                items.append({"type": "image", "url": png_url, "size": "64px",
+                              "aspectMode": "fit", "aspectRatio": "1:1", "flex": 0})
             items.append({"type": "text", "text": name, "weight": "bold", "size": "md", "color": "#0F172A", "wrap": True, "flex": 1})
             return {"type": "box", "layout": "horizontal", "alignItems": "center", "spacing": "md", "contents": items}
         bubbles.append({
@@ -548,7 +553,7 @@ async def reply_for(text):
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "line-sports-ai", "version": "0.6.7"}
+    return {"status": "ok", "service": "line-sports-ai", "version": "0.6.8"}
 
 @app.post("/webhooks/line")
 async def webhook(request: Request, x_line_signature: str | None = Header(default=None)):
