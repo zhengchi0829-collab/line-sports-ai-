@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 
-app = FastAPI(title="體育AI分析系統", version="0.6.6")
+app = FastAPI(title="體育AI分析系統", version="0.6.7")
 log = logging.getLogger("sports_bot")
 TZ = ZoneInfo("Asia/Taipei")
 MENU = ("歡迎使用【體育AI分析系統】！\n\n"
@@ -383,6 +383,12 @@ def offline_analysis(sport, matchup=None):
                              txt(f"📊 大小分  {total}", "lg", "#FFFFFF", "bold"),
                              txt("模擬方向 · 非即時盤口", "xxs", "#CBD5E1")
                          ]}
+                    ]},
+                "footer": {"type": "box", "layout": "vertical", "backgroundColor": "#FFFFFF",
+                    "paddingAll": "16px", "contents": [
+                        {"type": "button", "style": "primary", "color": accent,
+                         "height": "md", "action": {"type": "message",
+                             "label": "🔎 分析其他隊伍", "text": sport}}
                     ]}
             }}
 
@@ -542,7 +548,7 @@ async def reply_for(text):
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "line-sports-ai", "version": "0.6.6"}
+    return {"status": "ok", "service": "line-sports-ai", "version": "0.6.7"}
 
 @app.post("/webhooks/line")
 async def webhook(request: Request, x_line_signature: str | None = Header(default=None)):
