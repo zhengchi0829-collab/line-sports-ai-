@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 
-app = FastAPI(title="體育AI分析系統", version="0.6.22")
+app = FastAPI(title="體育AI分析系統", version="0.6.23")
 log = logging.getLogger("sports_bot")
 TZ = ZoneInfo("Asia/Taipei")
 MENU = ("歡迎使用【體育AI分析系統】！\n\n"
@@ -411,10 +411,12 @@ def offline_analysis(sport, matchup=None, team_history=None, star_players=None):
                          ]}
                     ]},
                 "footer": {"type": "box", "layout": "vertical", "backgroundColor": "#FFFFFF",
-                    "paddingAll": "10px", "contents": [
+                    "paddingAll": "10px", "spacing": "sm", "contents": [
                         {"type": "button", "style": "primary", "color": accent,
                          "height": "sm", "action": {"type": "message",
-                             "label": "🔎 分析其他隊伍", "text": sport}}
+                             "label": f"🔎 其他{sport}賽事", "text": sport}},
+                        {"type": "button", "style": "secondary", "height": "sm",
+                         "action": {"type": "message", "label": "🏠 回主選單", "text": "選單"}}
                     ]}
             }}
 
