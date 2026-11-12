@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 
-app = FastAPI(title="體育AI分析系統", version="0.6.18")
+app = FastAPI(title="體育AI分析系統", version="0.6.21")
 log = logging.getLogger("sports_bot")
 TZ = ZoneInfo("Asia/Taipei")
 MENU = ("歡迎使用【體育AI分析系統】！\n\n"
@@ -350,7 +350,12 @@ def offline_analysis(sport, matchup=None, team_history=None, star_players=None):
     pick = int(hashlib.sha256((sport + "|" + home + "|" + away).encode()).hexdigest()[:8], 16)
     winner = home if pick % 2 == 0 else away
     if sport == "足球":
-        total = "小 2.5 球" if pick % 3 else "大 2.5 球"
+        # Keep the demo total stable for the same matchup, but vary the line by matchup
+        # so every football card is not pinned to 2.5. This is still not a live market line.
+        football_lines = ("1.5", "2.0", "2.25", "2.5", "2.75", "3.0", "3.25", "3.5")
+        line = football_lines[(pick >> 3) % len(football_lines)]
+        direction = "大" if ((pick >> 1) & 1) else "小"
+        total = f"{direction} {line} 球"
     elif sport == "籃球":
         total = "小 220.5 分" if pick % 3 else "大 220.5 分"
     else:
