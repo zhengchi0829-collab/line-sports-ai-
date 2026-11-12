@@ -1,7 +1,7 @@
 """LINE entrypoint with immediate signature-verified webhook acknowledgement.
 
 The previous UI and team-data helpers are preserved byte-for-byte in legacy.py.
-No paid resources, external queues, push messages, or new API keys are used.
+No external queue or new API key is used. LINE push is used only as a fail-safe when reply delivery fails.
 The bounded in-process tasks/cache are not a durable production queue.
 """
 from __future__ import annotations
@@ -105,41 +105,99 @@ async def feature_health():
             "pending_events": len(app.state.pending)}
 
 
+async def _push_fallback(event, app, token: str, text_value: str) -> bool:
+    """Best-effort second channel when a reply token/send path fails."""
+    source = event.get("source", {}) if isinstance(event, dict) else {}
+    target = source.get("userId") or source.get("groupId") or source.get("roomId")
+    if not isinstance(target, str) or not target:
+        log.warning("line_fallback unavailable=no_target")
+        return False
+    payload = {"to": target, "messages": [{"type": "text", "text": str(text_value)[:5000]}]}
+    try:
+        response = await app.state.line_client.post(
+            "https://api.line.me/v2/bot/message/push",
+            headers={"Authorization": "Bearer " + token},
+            json=payload,
+        )
+        log.info("line_fallback_push version=%s status=%s", VERSION, response.status_code)
+        return 200 <= response.status_code < 300
+    except httpx.HTTPError as exc:
+        log.error("line_fallback_push transport_error=%s", type(exc).__name__)
+        return False
+
+
 async def process_event(event, app):
-    """Own the reply token once; external feed failure never blocks acknowledgement."""
+    """Every accepted command gets either a reply or a best-effort push fallback."""
     started = time.monotonic()
     raw = "\u9078\u55ae"
     if event.get("type") == "message":
         raw = event.get("message", {}).get("text", "")
     elif event.get("type") == "postback":
         raw = event.get("postback", {}).get("data", "").removeprefix("cmd:")
+
+    fallback_text = "系統剛剛忙碌或資料來源暫時無法回應，請再點一次原本的按鈕。"
     try:
-        messages = await asyncio.wait_for(app.state.controller.reply(raw), timeout=6)
+        messages = await asyncio.wait_for(app.state.controller.reply(raw), timeout=5.0)
+        if not isinstance(messages, list) or not messages:
+            raise ValueError("empty_messages")
     except asyncio.CancelledError:
         raise
+    except TimeoutError:
+        log.warning("command_timeout raw=%s", str(raw)[:40])
+        messages = [{"type": "text", "text": fallback_text, "quickReply": quick_menu()}]
     except Exception as exc:
-        log.warning("command_error kind=%s", type(exc).__name__)
-        messages = [notice("", Snapshot(errors=["command_error"]))]
+        log.warning("command_error kind=%s raw=%s", type(exc).__name__, str(raw)[:40])
+        messages = [{"type": "text", "text": fallback_text, "quickReply": quick_menu()}]
+
     token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "").strip()
     payload = {"replyToken": event["replyToken"], "messages": messages[:5]}
+    reply_ok = False
     try:
-        response = await app.state.line_client.post("https://api.line.me/v2/bot/message/reply",
-                                                   headers={"Authorization": "Bearer " + token}, json=payload)
-        # A rejected Flex schema has not consumed the reply token. Only this
-        # explicit validation failure is retried as text, never an ambiguous send.
+        response = await app.state.line_client.post(
+            "https://api.line.me/v2/bot/message/reply",
+            headers={"Authorization": "Bearer " + token},
+            json=payload,
+        )
+        # Invalid Flex/card payload: retry once as plain text while the reply token
+        # is still usable.
         if response.status_code == 400:
             try:
                 details = response.json().get("details", [])
             except ValueError:
                 details = []
-            if any("messages" in str(d.get("property", "")) for d in details if isinstance(d, dict)):
-                payload["messages"] = [{"type": "text", "text": "\u5361\u7247\u986f\u793a\u7570\u5e38\uff0c\u8acb\u9ede\u9078\u4e0b\u65b9\u7403\u7a2e\u91cd\u65b0\u67e5\u8a62\u3002", "quickReply": quick_menu()}]
-                response = await app.state.line_client.post("https://api.line.me/v2/bot/message/reply",
-                    headers={"Authorization": "Bearer " + token}, json=payload)
-        log.info("line_reply version=%s status=%s elapsed_ms=%d messages=%d", VERSION,
-                 response.status_code, int((time.monotonic() - started) * 1000), len(payload["messages"]))
+            schema_error = any(
+                "messages" in str(d.get("property", ""))
+                for d in details if isinstance(d, dict)
+            )
+            if schema_error:
+                payload["messages"] = [{
+                    "type": "text",
+                    "text": "卡片顯示異常，已改用文字回覆。請再點一次原本的按鈕。",
+                    "quickReply": quick_menu(),
+                }]
+                response = await app.state.line_client.post(
+                    "https://api.line.me/v2/bot/message/reply",
+                    headers={"Authorization": "Bearer " + token},
+                    json=payload,
+                )
+        reply_ok = 200 <= response.status_code < 300
+        log.info(
+            "line_reply version=%s status=%s elapsed_ms=%d messages=%d",
+            VERSION, response.status_code,
+            int((time.monotonic() - started) * 1000),
+            len(payload["messages"]),
+        )
+        if not reply_ok:
+            await _push_fallback(
+                event, app, token,
+                "剛剛的操作沒有成功送出回覆，系統已自動補送。請再點一次原本的按鈕。"
+            )
     except httpx.HTTPError as exc:
         log.error("line_reply transport_error=%s", type(exc).__name__)
+        await _push_fallback(
+            event, app, token,
+            "剛剛 LINE 回覆連線失敗，系統已自動補送。請再點一次原本的按鈕。"
+        )
 
 
 @app.post("/webhooks/line")
@@ -190,5 +248,15 @@ async def webhook(request: Request):
         seen[key] = now + 1200
         task = asyncio.create_task(process_event(event, app))
         app.state.pending.add(task)
-        task.add_done_callback(app.state.pending.discard)
+        def _done(done):
+            app.state.pending.discard(done)
+            if done.cancelled():
+                return
+            try:
+                exc = done.exception()
+            except asyncio.CancelledError:
+                return
+            if exc:
+                log.error("event_task_unhandled kind=%s", type(exc).__name__)
+        task.add_done_callback(_done)
     return {"ok": True}

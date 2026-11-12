@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.6.35"
+VERSION = "0.6.36"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -281,7 +281,7 @@ class Fixtures:
             task = asyncio.create_task(self.refresh(sport))
             self.jobs[sport] = task
         try:
-            return await asyncio.wait_for(asyncio.shield(task), timeout=4.4)
+            return await asyncio.wait_for(asyncio.shield(task), timeout=3.2)
         except (TimeoutError, httpx.HTTPError):
             if old and time.monotonic() - old[0] < 21600:
                 return Snapshot(old[1].games, old[1].fetched, ["refresh_timeout"], 0, True)
