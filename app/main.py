@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 
-app = FastAPI(title="體育AI分析系統", version="0.6.3")
+app = FastAPI(title="體育AI分析系統", version="0.6.4")
 log = logging.getLogger("sports_bot")
 TZ = ZoneInfo("Asia/Taipei")
 MENU = ("歡迎使用【體育AI分析系統】！\n\n"
@@ -426,7 +426,7 @@ async def upcoming_match_cards(sport):
                                 continue
                             dt = datetime.fromisoformat(raw.replace("Z", "+00:00")).astimezone(TZ)
                             if dt >= now:
-                                games.append((dt, g.get("team1", {}).get("teamName", ""), g.get("team2", {}).get("teamName", ""), "德甲"))
+                                games.append((dt, g.get("team1", {}).get("teamName", ""), g.get("team2", {}).get("teamName", ""), "德甲", g.get("team1", {}).get("teamIconUrl", ""), g.get("team2", {}).get("teamIconUrl", "")))
                     except (httpx.HTTPError, ValueError, TypeError, KeyError):
                         continue
             elif sport == "籃球":
@@ -436,7 +436,7 @@ async def upcoming_match_cards(sport):
                     dt = datetime.fromisoformat(g["gameTimeUTC"].replace("Z", "+00:00")).astimezone(TZ)
                     if dt >= now and g.get("gameStatus") == 1:
                         a, h = g.get("awayTeam", {}), g.get("homeTeam", {})
-                        games.append((dt, f"{a.get('teamCity', '')} {a.get('teamName', '')}".strip(), f"{h.get('teamCity', '')} {h.get('teamName', '')}".strip(), "NBA"))
+                        games.append((dt, f"{a.get('teamCity', '')} {a.get('teamName', '')}".strip(), f"{h.get('teamCity', '')} {h.get('teamName', '')}".strip(), "NBA", f"https://cdn.nba.com/logos/nba/{a['teamId']}/primary/L/logo.svg" if a.get("teamId") else "", f"https://cdn.nba.com/logos/nba/{h['teamId']}/primary/L/logo.svg" if h.get("teamId") else ""))
             elif sport == "棒球":
                 r = await client.get("https://statsapi.mlb.com/api/v1/schedule", params={"sportId": 1, "startDate": now.strftime("%Y-%m-%d"), "endDate": (now + timedelta(days=90)).strftime("%Y-%m-%d")})
                 r.raise_for_status()
@@ -445,7 +445,7 @@ async def upcoming_match_cards(sport):
                         dt = datetime.fromisoformat(g["gameDate"].replace("Z", "+00:00")).astimezone(TZ)
                         if dt >= now:
                             teams = g.get("teams", {})
-                            games.append((dt, teams.get("away", {}).get("team", {}).get("name", ""), teams.get("home", {}).get("team", {}).get("name", ""), "MLB"))
+                            games.append((dt, teams.get("away", {}).get("team", {}).get("name", ""), teams.get("home", {}).get("team", {}).get("name", ""), "MLB", f"https://www.mlbstatic.com/team-logos/{teams['away']['team']['id']}.svg" if teams.get("away", {}).get("team", {}).get("id") else "", f"https://www.mlbstatic.com/team-logos/{teams['home']['team']['id']}.svg" if teams.get("home", {}).get("team", {}).get("id") else ""))
         except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
             log.warning("Fixture cards unavailable for %s: %s", sport, str(exc)[:100])
     games = sorted((x for x in games if x[1] and x[2]), key=lambda x: x[0])[:8]
@@ -454,11 +454,17 @@ async def upcoming_match_cards(sport):
     bubbles = []
     palette = {"足球": ("#0B3B36", "#12A594", "⚽"), "籃球": ("#47230D", "#EA580C", "🏀"), "棒球": ("#1F2459", "#6366F1", "⚾")}
     dark, accent, emoji = palette[sport]
-    for dt, away, home, league in games:
+    for dt, away, home, league, away_logo, home_logo in games:
         away_zh, home_zh = team_zh(away), team_zh(home)
         command = f"分析{sport} {away_zh} vs {home_zh}"
         if len(command) > 300:
             continue
+        def team_row(name, logo):
+            items = []
+            if isinstance(logo, str) and logo.startswith("https://"):
+                items.append({"type": "image", "url": logo, "size": "sm", "aspectMode": "fit", "aspectRatio": "1:1", "flex": 0})
+            items.append({"type": "text", "text": name, "weight": "bold", "size": "md", "color": "#0F172A", "wrap": True, "flex": 1})
+            return {"type": "box", "layout": "horizontal", "alignItems": "center", "spacing": "md", "contents": items}
         bubbles.append({
             "type": "bubble", "size": "kilo",
             "header": {"type": "box", "layout": "vertical", "backgroundColor": dark,
@@ -471,9 +477,9 @@ async def upcoming_match_cards(sport):
                 "paddingAll": "20px", "spacing": "lg", "contents": [
                     {"type": "text", "text": "近期焦點對戰", "size": "xs", "weight": "bold", "color": accent},
                     {"type": "box", "layout": "vertical", "spacing": "sm", "contents": [
-                        {"type": "text", "text": away_zh, "weight": "bold", "size": "lg", "color": "#0F172A", "wrap": True},
+                        team_row(away_zh, away_logo),
                         {"type": "text", "text": "V S", "weight": "bold", "size": "md", "align": "center", "color": accent},
-                        {"type": "text", "text": home_zh, "weight": "bold", "size": "lg", "color": "#0F172A", "wrap": True}
+                        team_row(home_zh, home_logo)
                     ]},
                     {"type": "separator", "color": "#CBD5E1"},
                     {"type": "text", "text": "點擊下方按鈕查看對戰情境分析", "size": "xs", "color": "#64748B", "wrap": True}
@@ -514,7 +520,7 @@ async def reply_for(text):
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "line-sports-ai", "version": "0.6.3"}
+    return {"status": "ok", "service": "line-sports-ai", "version": "0.6.4"}
 
 @app.post("/webhooks/line")
 async def webhook(request: Request, x_line_signature: str | None = Header(default=None)):
