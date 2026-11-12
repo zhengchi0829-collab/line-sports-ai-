@@ -18,11 +18,11 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.6.36"
+VERSION = "0.6.37"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
-KEYS.update({"NBA": "basketball", "NCAA": "basketball_ncaa", "NBL": "basketball_nbl", "MLB": "baseball", "NPB": "baseball_npb", "KBO": "baseball_kbo", "CPBL": "baseball_cpbl", "MiLB": "baseball_milb"})
+KEYS.update({"NBA": "basketball", "NCAA": "basketball_ncaa", "NBL": "basketball_nbl", "TPBL": "basketball_tpbl", "MLB": "baseball", "NPB": "baseball_npb", "KBO": "baseball_kbo", "CPBL": "baseball_cpbl", "MiLB": "baseball_milb"})
 DEMO_PAIRS = {
     "soccer": ("\u62dc\u4ec1\u6155\u5c3c\u9ed1", "\u591a\u7279\u8499\u5fb7"),
     "basketball": ("\u6d1b\u6749\u78ef\u6e56\u4eba", "\u91d1\u5dde\u52c7\u58eb"),
@@ -184,6 +184,32 @@ class Fixtures:
             async with asyncio.timeout(4.0):
                 response = await self.client.get(url, params=params)
                 response.raise_for_status()
+                if kind == "tpbl_html":
+                    html = response.text
+                    game_no = re.search(r"GAME\s*(\d+)", html, re.I)
+                    date_match = re.search(r"(\d{2})/(\d{2})\s*\([^)]*\)\s*(\d{2}:\d{2})", html)
+                    teams = re.findall(r"<h4[^>]*>([^<]{2,30})</h4>", html)
+                    if not date_match:
+                        # Fallback to visible text extraction patterns used by official game pages.
+                        text_body = re.sub(r"<[^>]+>", " ", html)
+                        date_match = re.search(r"(\d{2})/(\d{2})\s*\([^)]*\)\s*(\d{2}:\d{2})", text_body)
+                        if not teams:
+                            names = ["臺北台新戰神", "新北中信特攻", "新北國王", "桃園台啤永豐雲豹",
+                                     "新竹御嵿攻城獅", "福爾摩沙夢想家", "高雄全家海神"]
+                            teams = [name for name in names if name in text_body]
+                    if not date_match or len(teams) < 2:
+                        raise ValueError("TPBL game page parse failed")
+                    year = datetime.now(TZ).year
+                    month, day, hm = date_match.groups()
+                    # 2026-27 season pages currently in late 2026/early 2027.
+                    y = year if int(month) >= 7 else year + 1
+                    dt = datetime.strptime(f"{y}-{month}-{day} {hm}", "%Y-%m-%d %H:%M").replace(tzinfo=TZ)
+                    # Official page text is away first, home second.
+                    away, home = teams[0], teams[1]
+                    game = Game("tpbl-" + (game_no.group(1) if game_no else url.rsplit("/",1)[-1]),
+                                "basketball", "TPBL", dt, home, away, "", "",
+                                "TPBL 官方", "scheduled", True)
+                    return [game], None
                 return parse_feed(kind, response.json()), None
         except httpx.HTTPStatusError as exc:
             status = exc.response.status_code
@@ -226,6 +252,14 @@ class Fixtures:
                  {"dates": now.strftime("%Y%m%d")}, "espn"),
                 ("nbl_next", "https://site.api.espn.com/apis/site/v2/sports/basketball/nbl/scoreboard",
                  {"dates": (now + timedelta(days=1)).strftime("%Y%m%d")}, "espn"),
+            ]
+        if sport == "basketball_tpbl":
+            return [
+                ("tpbl_official_13", "https://tpbl.basketball/schedule/27554", {}, "tpbl_html"),
+                ("tpbl_official_15", "https://tpbl.basketball/schedule/27556", {}, "tpbl_html"),
+                ("tpbl_official_17", "https://tpbl.basketball/schedule/27558", {}, "tpbl_html"),
+                ("tpbl_official_19", "https://tpbl.basketball/schedule/27560", {}, "tpbl_html"),
+                ("tpbl_official_20", "https://tpbl.basketball/schedule/27561", {}, "tpbl_html"),
             ]
         if sport == "baseball":
             return [("mlb", "https://statsapi.mlb.com/api/v1/schedule",
@@ -376,6 +410,7 @@ BASKETBALL_LEAGUE_LABELS = {
     "basketball": "NBA",
     "basketball_ncaa": "NCAA",
     "basketball_nbl": "NBL",
+    "basketball_tpbl": "TPBL",
 }
 
 
@@ -402,7 +437,7 @@ def fixture_cards(sport: str, snapshot: Snapshot, team_name, today=False, now=No
     if not games:
         return notice("basketball" if sport.startswith("basketball_") else ("baseball" if sport.startswith("baseball_") else sport), snapshot)
     colors = {"soccer": "#0F766E", "basketball": "#C2410C", "basketball_ncaa": "#B45309",
-              "basketball_nbl": "#0369A1", "baseball": "#4F46E5", "baseball_npb": "#B91C1C",
+              "basketball_nbl": "#0369A1", "basketball_tpbl": "#7C3AED", "baseball": "#4F46E5", "baseball_npb": "#B91C1C",
               "baseball_kbo": "#0369A1", "baseball_cpbl": "#047857", "baseball_milb": "#92400E"}
     accent = colors[sport]
     bubbles = []
@@ -508,8 +543,6 @@ class Controller:
             return [league_menu()]
         if compact == "棒球":
             return [baseball_menu()]
-        if compact == "TPBL":
-            return [self.tpbl_analysis_entry()]
         if compact in KEYS:
             key = KEYS[compact]
             return [fixture_cards(key, await self.fixtures.get(key), self.ui.team_zh)]
@@ -525,9 +558,7 @@ class Controller:
             league = basketball_league or baseball_league
             base_sport = "籃球" if basketball_league else ("棒球" if baseball_league else sport)
             if not matchup:
-                if league == "TPBL":
-                    return [self.tpbl_analysis_entry()]
-                key = {"NBA": "basketball", "NCAA": "basketball_ncaa", "NBL": "basketball_nbl",
+                key = {"NBA": "basketball", "NCAA": "basketball_ncaa", "NBL": "basketball_nbl", "TPBL": "basketball_tpbl",
                        "MLB": "baseball", "NPB": "baseball_npb", "KBO": "baseball_kbo",
                        "CPBL": "baseball_cpbl", "MiLB": "baseball_milb"}.get(league) if league else KEYS[sport]
                 return [fixture_cards(key, await self.fixtures.get(key), self.ui.team_zh)]
