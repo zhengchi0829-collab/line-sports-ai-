@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 
-app = FastAPI(title="體育AI分析系統", version="0.3.9")
+app = FastAPI(title="體育AI分析系統", version="0.4.0")
 log = logging.getLogger("sports_bot")
 TZ = ZoneInfo("Asia/Taipei")
 MENU = ("歡迎使用【體育AI分析系統】！\n\n"
@@ -115,6 +115,48 @@ async def official_events(client, league, date):
         return output
     return []
 
+async def openliga_next(client, now):
+    """Free no-key Bundesliga fixture feed, independent of ESPN."""
+    games = []
+    for season in (now.year - 1, now.year):
+        response = await client.get(f"https://api.openligadb.de/getmatchdata/bl1/{season}", timeout=3)
+        response.raise_for_status()
+        games.extend(response.json())
+    upcoming = []
+    for game in games:
+        try:
+            raw = game.get("matchDateTimeUTC") or game.get("matchDateTime")
+            start = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=ZoneInfo("UTC"))
+            start = start.astimezone(TZ)
+            if start >= now:
+                upcoming.append((start, game))
+        except (ValueError, TypeError, AttributeError):
+            continue
+    if not upcoming:
+        return None
+    start, game = min(upcoming, key=lambda x: x[0])
+    return f"【足球｜德甲下一場】\\n台灣時間：{start:%Y/%m/%d %H:%M}\\n{game.get('team1', {}).get('teamName', '主隊')} vs {game.get('team2', {}).get('teamName', '客隊')}\\n來源：OpenLigaDB 免費公開賽程"
+
+async def nba_next(client, now):
+    """Official NBA scoreboard is only today's games; never claim it is a future calendar."""
+    response = await client.get("https://cdn.nba.com/static/json/liveData/scoreboard/todaysScoreboard_00.json", timeout=3)
+    response.raise_for_status()
+    upcoming = []
+    for game in response.json().get("scoreboard", {}).get("games", []):
+        try:
+            start = datetime.fromisoformat(game["gameTimeUTC"].replace("Z", "+00:00")).astimezone(TZ)
+            if start >= now and game.get("gameStatus") == 1:
+                away, home = game.get("awayTeam", {}), game.get("homeTeam", {})
+                upcoming.append((start, away, home))
+        except (ValueError, KeyError, TypeError):
+            continue
+    if not upcoming:
+        return None
+    start, away, home = min(upcoming, key=lambda x: x[0])
+    return f"【NBA 下一場】\\n台灣時間：{start:%Y/%m/%d %H:%M}\\n{away.get('teamCity', '')} {away.get('teamName', '客隊')} vs {home.get('teamCity', '')} {home.get('teamName', '主隊')}\\n來源：NBA 官方今日賽程"
+
 async def get_events(client, league, date):
     """Prefer official public feeds for NBA and MLB."""
     if league in ("baseball/mlb", "basketball/nba"):
@@ -204,6 +246,22 @@ async def mlb_next_game(now):
 
 async def sports_report(sport, analysis=False, future=False):
     now = datetime.now(TZ)
+    if sport == "足球":
+        try:
+            async with httpx.AsyncClient() as client:
+                result = await openliga_next(client, now)
+                if result:
+                    return result
+        except (httpx.HTTPError, ValueError, TypeError) as exc:
+            log.warning("OpenLigaDB unavailable: %s", str(exc)[:140])
+    if sport == "籃球":
+        try:
+            async with httpx.AsyncClient() as client:
+                result = await nba_next(client, now)
+                if result:
+                    return result
+        except (httpx.HTTPError, ValueError, TypeError) as exc:
+            log.warning("NBA official next unavailable: %s", str(exc)[:140])
     if sport == "棒球":
         try:
             return await mlb_next_game(now)
@@ -285,7 +343,7 @@ async def reply_for(text):
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "line-sports-ai", "version": "0.3.9"}
+    return {"status": "ok", "service": "line-sports-ai", "version": "0.4.0"}
 
 @app.post("/webhooks/line")
 async def webhook(request: Request, x_line_signature: str | None = Header(default=None)):
