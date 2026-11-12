@@ -18,10 +18,10 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.6.23"
+VERSION = "0.6.24"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
-KEYS = {v: k for k, v in SPORTS.items()}
+KEYS = {v: k for k, v in SPORTS.items()}\nKEYS.update({"NBA": "basketball", "MLB": "baseball"})
 DEMO_PAIRS = {
     "soccer": ("\u62dc\u4ec1\u6155\u5c3c\u9ed1", "\u591a\u7279\u8499\u5fb7"),
     "basketball": ("\u6d1b\u6749\u78ef\u6e56\u4eba", "\u91d1\u5dde\u52c7\u58eb"),
@@ -263,7 +263,7 @@ def button(label: str, command: str, color="#0F766E") -> dict:
 
 def quick_menu() -> dict:
     return {"items": [{"type": "action", "action": {"type": "message", "label": name, "text": name}}
-                      for name in [*SPORTS.values(), TODAY, FUTURE, MENU]]}
+                      for name in [*SPORTS.values(), "NBA", "MLB", TODAY, FUTURE, MENU]]}
 
 
 def notice(sport: str, snapshot: Snapshot) -> dict:

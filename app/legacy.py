@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 
-app = FastAPI(title="體育AI分析系統", version="0.6.23")
+app = FastAPI(title="體育AI分析系統", version="0.6.24")
 log = logging.getLogger("sports_bot")
 TZ = ZoneInfo("Asia/Taipei")
 MENU = ("歡迎使用【體育AI分析系統】！\n\n"
@@ -34,8 +34,8 @@ def menu_card():
     entries = [
         ("📅 今日賽事", "今日賽事", "#2563EB"),
         ("⚽ 足球", "足球", "#0F766E"),
-        ("🏀 籃球", "籃球", "#C2410C"),
-        ("⚾ 棒球", "棒球", "#7C3AED"),
+        ("🏀 NBA", "NBA", "#C2410C"),
+        ("⚾ MLB", "MLB", "#7C3AED"),
         ("📊 賽事分析", "賽事分析", "#334155"),
         ("🗓 未來賽事", "未來賽事", "#334155"),
     ]
