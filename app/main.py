@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 
-app = FastAPI(title="體育AI分析系統", version="0.6.17")
+app = FastAPI(title="體育AI分析系統", version="0.6.18")
 log = logging.getLogger("sports_bot")
 TZ = ZoneInfo("Asia/Taipei")
 MENU = ("歡迎使用【體育AI分析系統】！\n\n"
@@ -481,6 +481,29 @@ async def upcoming_match_cards(sport):
                     if dt >= now and g.get("gameStatus") == 1:
                         a, h = g.get("awayTeam", {}), g.get("homeTeam", {})
                         games.append((dt, f"{a.get('teamCity', '')} {a.get('teamName', '')}".strip(), f"{h.get('teamCity', '')} {h.get('teamName', '')}".strip(), "NBA", f"https://cdn.nba.com/logos/nba/{a['teamId']}/primary/L/logo.svg" if a.get("teamId") else "", f"https://cdn.nba.com/logos/nba/{h['teamId']}/primary/L/logo.svg" if h.get("teamId") else ""))
+                # NBA official scoreboard is today-only; add future fixtures from ESPN.
+                try:
+                    end_day = (now + timedelta(days=14)).strftime("%Y%m%d")
+                    start_day = now.strftime("%Y%m%d")
+                    feed = await client.get(
+                        "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard",
+                        params={"dates": start_day + "-" + end_day, "limit": 200}, timeout=4)
+                    feed.raise_for_status()
+                    for event in feed.json().get("events", []):
+                        competitions = event.get("competitions") or []
+                        if not competitions:
+                            continue
+                        dt = datetime.fromisoformat(event["date"].replace("Z", "+00:00")).astimezone(TZ)
+                        if dt < now or competitions[0].get("status", {}).get("type", {}).get("completed"):
+                            continue
+                        competitors = competitions[0].get("competitors", [])
+                        home_team = next((c.get("team", {}) for c in competitors if c.get("homeAway") == "home"), {})
+                        away_team = next((c.get("team", {}) for c in competitors if c.get("homeAway") == "away"), {})
+                        if home_team and away_team:
+                            games.append((dt, away_team.get("displayName", ""), home_team.get("displayName", ""),
+                                          "NBA", away_team.get("logo", ""), home_team.get("logo", "")))
+                except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+                    log.warning("NBA future schedule unavailable: %s", str(exc)[:120])
             elif sport == "棒球":
                 r = await client.get("https://statsapi.mlb.com/api/v1/schedule", params={"sportId": 1, "startDate": now.strftime("%Y-%m-%d"), "endDate": (now + timedelta(days=90)).strftime("%Y-%m-%d")})
                 r.raise_for_status()
@@ -773,12 +796,12 @@ async def ensure_persistent_rich_menu():
             existing = await client.get("https://api.line.me/v2/bot/richmenu/list", headers=headers)
             existing.raise_for_status()
             for menu in existing.json().get("richmenus", []):
-                if menu.get("name") == "Sports AI Persistent Menu v0.6.17":
+                if menu.get("name") == "Sports AI Persistent Menu v0.6.18":
                     rich_id = menu["richMenuId"]
                     break
             else:
                 payload = {"size": {"width": 1200, "height": 405},
-                           "selected": True, "name": "Sports AI Persistent Menu v0.6.17",
+                           "selected": True, "name": "Sports AI Persistent Menu v0.6.18",
                            "chatBarText": "⚽ 體育賽事快捷選單", "areas": areas}
                 created = await client.post("https://api.line.me/v2/bot/richmenu",
                                             headers=headers, json=payload)
@@ -815,7 +838,7 @@ async def setup_rich_menu_on_startup():
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "line-sports-ai", "version": "0.6.17"}
+    return {"status": "ok", "service": "line-sports-ai", "version": "0.6.18"}
 
 @app.post("/webhooks/line")
 async def webhook(request: Request, x_line_signature: str | None = Header(default=None)):
