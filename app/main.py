@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 
-app = FastAPI(title="體育AI分析系統", version="0.6.4")
+app = FastAPI(title="體育AI分析系統", version="0.6.5")
 log = logging.getLogger("sports_bot")
 TZ = ZoneInfo("Asia/Taipei")
 MENU = ("歡迎使用【體育AI分析系統】！\n\n"
@@ -355,14 +355,36 @@ def offline_analysis(sport, matchup=None):
         total = "小 220.5 分" if pick % 3 else "大 220.5 分"
     else:
         total = "小 8.5 分" if pick % 3 else "大 8.5 分"
-    suggestion = f"獨贏：{winner}\\n大小分：{total}\\n（模擬選擇，非即時盤口）"
-    return (f"{icons[sport]}【{sport}對戰分析】\n{home} VS {away}\n\n"
-            f"📊 無資料基準：{odds}\n\n"
-            f"🔍 分析重點：\n{focus}\n\n"
-            f"📈 比賽情境：{scenarios}\n\n"
-            f"🎯 分析結論：{result}\n\n"
-            f"💡 推薦方向：\n{suggestion}\n\n"
-            "⚠️ 離線情境推演；未取得即時數據，百分比是中立起始值，不是真實預測勝率。")
+    accent = {"足球": "#0D9488", "籃球": "#EA580C", "棒球": "#6366F1"}[sport]
+    def txt(value, size="sm", color="#334155", weight="regular"):
+        return {"type": "text", "text": value, "size": size, "color": color, "weight": weight, "wrap": True}
+    def panel(heading, content, background="#F1F5F9"):
+        return {"type": "box", "layout": "vertical", "backgroundColor": background,
+                "cornerRadius": "12px", "paddingAll": "16px", "spacing": "sm",
+                "contents": [txt(heading, "sm", accent, "bold"), txt(content)]}
+    return {"type": "flex", "altText": f"{sport}對戰分析｜{home} VS {away}",
+            "contents": {"type": "bubble", "size": "mega",
+                "header": {"type": "box", "layout": "vertical", "backgroundColor": "#0F172A",
+                    "paddingAll": "22px", "spacing": "sm", "contents": [
+                        txt(f"{icons[sport]}  MATCH ANALYSIS", "xs", "#93C5FD", "bold"),
+                        txt(f"{home}  VS  {away}", "lg", "#FFFFFF", "bold"),
+                        txt(f"{sport} · 對戰情境分析", "xs", "#CBD5E1")]},
+                "body": {"type": "box", "layout": "vertical", "backgroundColor": "#FFFFFF",
+                    "paddingAll": "18px", "spacing": "md", "contents": [
+                        panel("🔍 分析重點", focus),
+                        panel("📈 比賽情境", scenarios),
+                        panel("🎯 分析結論", result),
+                        {"type": "box", "layout": "vertical", "backgroundColor": "#0F172A",
+                         "cornerRadius": "14px", "paddingAll": "18px", "spacing": "md",
+                         "contents": [
+                             txt("✦ 推薦方向", "md", "#FDE68A", "bold"),
+                             txt(f"🏆 獨贏  {winner}", "lg", "#FFFFFF", "bold"),
+                             {"type": "separator", "color": "#475569"},
+                             txt(f"📊 大小分  {total}", "lg", "#FFFFFF", "bold"),
+                             txt("模擬方向 · 非即時盤口", "xxs", "#CBD5E1")
+                         ]}
+                    ]}
+            }}
 
 TEAM_ZH = {
     "Bayern Munich": "拜仁慕尼黑", "FC Bayern München": "拜仁慕尼黑", "Borussia Dortmund": "多特蒙德",
@@ -520,7 +542,7 @@ async def reply_for(text):
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "line-sports-ai", "version": "0.6.4"}
+    return {"status": "ok", "service": "line-sports-ai", "version": "0.6.5"}
 
 @app.post("/webhooks/line")
 async def webhook(request: Request, x_line_signature: str | None = Header(default=None)):
