@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 
-app = FastAPI(title="體育AI分析系統", version="0.5.0")
+app = FastAPI(title="體育AI分析系統", version="0.5.1")
 log = logging.getLogger("sports_bot")
 TZ = ZoneInfo("Asia/Taipei")
 MENU = ("歡迎使用【體育AI分析系統】！\n\n"
@@ -351,11 +351,12 @@ def offline_analysis(sport, matchup=None):
             "⚠️ 離線假設性分析，未確認賽事存在，不可當作真實勝率或投注依據。")
 
 async def reply_for(text):
-    raw = text.strip()\n    cmd = raw.replace(" ", "")
+    raw = text.strip()
+    cmd = raw.replace(" ", "")
     if cmd in ("你好", "嗨", "開始", "選單", "幫助", "help"):
         return MENU
     if cmd in SPORTS:
-        return await sports_report(cmd)
+        return offline_analysis(cmd)
     if cmd in ("今日賽事", "未來賽事"):
         results = []
         for sport in SPORTS:
@@ -363,9 +364,12 @@ async def reply_for(text):
         return "\n\n".join(results)[:4800]
     if cmd in ("賽事分析", "AI分析", "AI預測", "預測戰績"):
         return ("【賽事數據分析】\n請輸入「分析足球」、「分析籃球」或「分析棒球」，"
-                "查看今天已收錄賽事及公開戰績。\n目前提供簡易統計估算，尚非 AI 模型預測。")
-    if cmd.startswith("分析") and cmd[2:] in SPORTS:
-        return await sports_report(cmd[2:], analysis=True)
+                "輸入「分析足球 A隊 vs B隊」進行情境分析。\n沒有真實數據時會標示中立基準。")
+    if raw.startswith("分析"):
+        rest = raw[2:].strip()
+        for sport in SPORTS:
+            if rest.startswith(sport):
+                return offline_analysis(sport, rest[len(sport):].strip())
     if cmd in ("會員中心", "VIP"):
         return "【會員中心】\n目前賽事查詢與公開數據分析免費使用。\n尚未開放註冊、登入、付費或訂閱。"
     return MENU
@@ -373,7 +377,7 @@ async def reply_for(text):
 @app.get("/")
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "line-sports-ai", "version": "0.5.0"}
+    return {"status": "ok", "service": "line-sports-ai", "version": "0.5.1"}
 
 @app.post("/webhooks/line")
 async def webhook(request: Request, x_line_signature: str | None = Header(default=None)):
