@@ -23,7 +23,7 @@ from fastapi import FastAPI, HTTPException, Request
 from . import legacy as ui
 from .reliability import (Controller, Game, Snapshot, SPORTS, TZ, VERSION,
                           fixture_cards, notice, quick_menu, date_category_menu,
-                          date_league_menu, odds_category_menu, odds_source_card,
+                          date_league_menu, odds_category_menu, odds_league_menu, odds_source_card,
                           select_games, SPECIFIED, holographic_messages)
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
@@ -71,6 +71,12 @@ async def startup_probe(app):
         odds_ui = odds_category_menu()
         odds_actions = str(odds_ui)
         assert "台灣運彩賠率" in odds_actions and "娛樂平台賠率" in odds_actions
+        for provider, prefix in (("台灣運彩賠率", "賠率台灣運彩"),
+                                 ("娛樂平台賠率", "賠率娛樂平台")):
+            league_menu = odds_league_menu(provider)
+            choices = str(league_menu)
+            assert prefix + "NBA" in choices and prefix + "MLB" in choices
+            assert "返回賠率分類" in choices
         no_odds = await app.state.controller.reply("分析NBA 未驗證主隊 vs 未驗證客隊")
         assert not any("獨贏賠率" in str(card) or "真實盤口" in str(card)
                        or "盤口更新：" in str(card) for card in no_odds)
@@ -88,7 +94,9 @@ async def startup_probe(app):
             new_cards = [date_category_menu("今日賽事"),
                          date_category_menu("未來賽事"),
                          odds_category_menu(), odds_source_card("台灣運彩賠率"),
-                         odds_source_card("娛樂平台賠率")]
+                         odds_source_card("娛樂平台賠率"),
+                         odds_league_menu("台灣運彩賠率"),
+                         odds_league_menu("娛樂平台賠率")]
             checked = await app.state.line_client.post(
                 "https://api.line.me/v2/bot/message/validate/reply",
                 headers=headers, json={"messages": holographic_messages(new_cards)})
