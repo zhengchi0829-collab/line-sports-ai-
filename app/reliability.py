@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.6.49"
+VERSION = "0.6.50"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -746,29 +746,144 @@ class Controller:
         self.details: dict[tuple, tuple] = {}
         self.jobs: dict[tuple, asyncio.Task] = {}
 
-    async def team_details(self, sport, a, b):
-        key = sport, a, b
+    async def team_details(self, sport, a, b, league=None):
+        """Verified recent form and registered players from the selected competition."""
+        key = (sport, league, a, b)
         cached = self.details.get(key)
-        if cached and time.monotonic() - cached[0] < (1800 if cached[1] or cached[2] else 120):
-            return cached[1:]
-        async def refresh():
+        if cached and time.monotonic() - cached[0] < 1200:
+            return cached[1]
+        paths = {
+            "英超": "soccer/eng.1", "西甲": "soccer/esp.1",
+            "德甲": "soccer/ger.1", "義甲": "soccer/ita.1",
+            "法甲": "soccer/fra.1", "歐冠": "soccer/uefa.champions",
+            "NBA": "basketball/nba", "NCAA": "basketball/mens-college-basketball",
+            "NBL": "basketball/nbl", "MLB": "baseball/mlb",
+        }
+        fallback = ("⚠️ 無法核實近期戰績，暫不提供勝率。", "⚠️ 尚未取得可核實的球員名單。", None)
+        path = paths.get(league or {"足球":"德甲","籃球":"NBA","棒球":"MLB"}.get(sport))
+        if not path:
+            return fallback
+        import difflib
+        import re as regex
+        base = "https://site.api.espn.com/apis/site/v2/sports/" + path
+        def norm(value):
+            return regex.sub(r"[^\\w]", "", str(value)).casefold()
+        def score_team(team, requested):
+            names = [team.get(k, "") for k in ("displayName", "name", "shortDisplayName", "abbreviation")]
+            names.extend(self.ui.team_zh(n) for n in list(names))
+            names.extend([team.get("location", "") + " " + team.get("name", "")])
+            rname = norm(requested)
+            return max((1.0 if norm(n) == rname else difflib.SequenceMatcher(None, norm(n), rname).ratio()
+                        for n in names if n), default=0.0)
+        async def fetch():
             try:
-                result = await asyncio.wait_for(self.ui.winner_team_details(sport, a, b), 10)
-            except (Exception,):
-                result = (None, None)
-            if len(self.details) >= 128:
-                self.details.pop(next(iter(self.details)))
-            self.details[key] = (time.monotonic(), *result)
-            return result
+                response = await self.fixtures.client.get(base + "/teams", params={"limit": "500"})
+                response.raise_for_status()
+                entries = response.json().get("sports", [{}])[0].get("leagues", [{}])[0].get("teams", [])
+                teams = [x.get("team", {}) for x in entries if isinstance(x, dict)]
+                matches = []
+                for name in (a, b):
+                    if not teams:
+                        return fallback
+                    team = max(teams, key=lambda x: score_team(x, name))
+                    if score_team(team, name) < 0.72 or not team.get("id"):
+                        return fallback
+                    matches.append(team)
+                if str(matches[0]["id"]) == str(matches[1]["id"]):
+                    return fallback
+                ids = [str(team["id"]) for team in matches]
+                responses = await asyncio.gather(
+                    *(self.fixtures.client.get(base + "/teams/" + ident + "/schedule") for ident in ids),
+                    return_exceptions=True)
+                records = []
+                for ident, response in zip(ids, responses):
+                    played = []
+                    if isinstance(response, httpx.Response) and response.status_code == 200:
+                        for event in response.json().get("events", []):
+                            comps = event.get("competitions") or []
+                            if not comps:
+                                continue
+                            comp = comps[0]
+                            status = comp.get("status") or event.get("status") or {}
+                            if not status.get("type", {}).get("completed"):
+                                continue
+                            competitors = comp.get("competitors") or []
+                            mine = next((c for c in competitors if str(c.get("team", {}).get("id")) == ident), None)
+                            if mine is None:
+                                continue
+                            if mine.get("winner") is True:
+                                outcome = "W"
+                            elif any(c.get("winner") is True for c in competitors):
+                                outcome = "L"
+                            else:
+                                # Ties are common in football and count as played, not wins.
+                                outcome = "D" if sport == "足球" else "U"
+                            if outcome != "U":
+                                played.append((event.get("date") or "", outcome))
+                    played.sort(reverse=True)
+                    recent = [outcome for _, outcome in played[:5]]
+                    wins = recent.count("W")
+                    draws = recent.count("D")
+                    losses = recent.count("L")
+                    records.append((wins, draws, losses, len(recent)))
+                if not any(rec[3] for rec in records):
+                    return fallback
+                form = []
+                for name, rec in zip((a, b), records):
+                    w, d, loss, n = rec
+                    form.append((f"{name}：近{n}場 {w}勝 {d}和 {loss}敗"
+                                 f"｜實際勝率 {w/n*100:.1f}%" if n else
+                                 f"{name}：近期賽果尚未取得"))
+                # Do not present a head-to-head prediction as an observed win percentage.
+                eligible = [(rec[0] / rec[3], rec[3], idx) for idx, rec in enumerate(records) if rec[3] >= 3]
+                chosen = None
+                if len(eligible) == 2 and eligible[0][0] != eligible[1][0]:
+                    chosen = (a, b)[max(eligible)[2]]
+                history = "【" + (league or sport) + "｜真實近況】\\n" + "\\n".join(form)
+                history += "\\n勝率指近五場完賽勝場比例，不是本場預測勝率。"
+                if not chosen:
+                    return (history, "雙方近況無足夠差異或樣本不足，暫無可靠推薦主力名單。", None)
+                selected_id = ids[0 if chosen == a else 1]
+                roster_response = await self.fixtures.client.get(
+                    base + "/teams/" + selected_id + "/roster")
+                names = []
+                if roster_response.status_code == 200:
+                    athletes = roster_response.json().get("athletes", [])
+                    if isinstance(athletes, dict):
+                        athletes = list(athletes.values())
+                    for group in athletes:
+                        items = group.get("items", []) if isinstance(group, dict) else []
+                        if not items and isinstance(group, dict):
+                            items = [group]
+                        for player in items:
+                            if not isinstance(player, dict):
+                                continue
+                            athlete = player.get("athlete", player)
+                            if not isinstance(athlete, dict):
+                                continue
+                            name = athlete.get("displayName") or athlete.get("fullName")
+                            if name and name not in names:
+                                names.append(name)
+                player_text = (f"{chosen}｜ESPN 現役登錄球員（不代表已確認先發）："
+                               + "、".join(names[:5])) if names else (
+                               f"{chosen}｜尚無可驗證的球員名單；不可推定主力或先發。")
+                return (history, player_text, chosen)
+            except (httpx.HTTPError, ValueError, TypeError, KeyError, IndexError) as exc:
+                log.warning("verified_team_stats_failed league=%s reason=%s", league, type(exc).__name__)
+                return fallback
         job = self.jobs.get(key)
         if job is None or job.done():
-            job = asyncio.create_task(refresh())
+            job = asyncio.create_task(fetch())
             self.jobs[key] = job
             job.add_done_callback(lambda done: self.jobs.pop(key, None) if self.jobs.get(key) is done else None)
         try:
-            return await asyncio.wait_for(asyncio.shield(job), 1.5)
+            result = await asyncio.wait_for(asyncio.shield(job), 3.3)
         except TimeoutError:
-            return cached[1:] if cached and time.monotonic() - cached[0] < 7200 else (None, None)
+            return cached[1] if cached else fallback
+        if len(self.details) >= 128:
+            self.details.pop(next(iter(self.details)))
+        self.details[key] = (time.monotonic(), result)
+        return result
 
     async def reply(self, raw: str) -> list[dict]:
         raw = str(raw).strip()[:300]
@@ -810,8 +925,9 @@ class Controller:
             parts = re.split(r"\s*(?:\bvs\.?\b|\u5c0d\u6230|\u5c0d|\uff0d|\u2014)\s*", matchup, maxsplit=1, flags=re.I)
             if len(parts) == 2 and all(p.strip() for p in parts):
                 a, b = (p.strip().lstrip(".").strip()[:35] for p in parts)
-                history, players = (None, None) if demo else await self.team_details(base_sport, a, b)
-                card = self.ui.offline_analysis(base_sport, a + " vs " + b, history, players, league=league)
+                history, players, recommended = (None, None, None) if demo else await self.team_details(base_sport, a, b, league)
+                card = self.ui.offline_analysis(base_sport, a + " vs " + b, history, players,
+                                                league=league, recommended_team=recommended)
                 if isinstance(card, dict):
                     if league:
                         card["contents"]["header"]["contents"][-1]["text"] = f"{league} · 對戰情境分析"

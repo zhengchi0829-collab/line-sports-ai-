@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 
-app = FastAPI(title="體育AI分析系統", version="0.6.49")
+app = FastAPI(title="體育AI分析系統", version="0.6.50")
 log = logging.getLogger("sports_bot")
 TZ = ZoneInfo("Asia/Taipei")
 MENU = ("歡迎使用【體育AI分析系統】！\n\n"
@@ -320,7 +320,7 @@ async def sports_report(sport, analysis=False, future=False):
     result = "\n".join(lines)
     return result[:4800]
 
-def offline_analysis(sport, matchup=None, team_history=None, star_players=None, league=None):
+def offline_analysis(sport, matchup=None, team_history=None, star_players=None, league=None, recommended_team=None):
     """Offline hypothetical analysis; do not present invented data as real."""
     icons = {"足球": "⚽", "籃球": "🏀", "棒球": "⚾"}
     if not matchup:
@@ -362,7 +362,7 @@ def offline_analysis(sport, matchup=None, team_history=None, star_players=None, 
     # Stable demo pick; no fabricated win probabilities or market odds.
     import hashlib
     pick = int(hashlib.sha256((sport + "|" + str(league or "") + "|" + home + "|" + away).encode()).hexdigest()[:8], 16)
-    winner = home if pick % 2 == 0 else away
+    winner = recommended_team if recommended_team in (home, away) else None
     if sport == "足球":
         # Keep the demo total stable for the same matchup, but vary the line by matchup
         # so every football card is not pinned to 2.5. This is still not a live market line.
@@ -392,35 +392,35 @@ def offline_analysis(sport, matchup=None, team_history=None, star_players=None, 
     # Without a verified sportsbook line, handicap is a clearly labelled scenario.
     # A simulated handicap does NOT imply a measured edge or an actual offered market.
     if sport == "足球":
-        handicap = f"{winner} -0.5 球（情境模擬）"
+        handicap = (f"{winner} -0.5 球（情境模擬）" if winner else "資料不足，暫無推薦")
         handicap_reason = "若支持隊伍僅平局，-0.5 不會過盤；須比較破門效率、陣容與對手防守。"
     elif sport == "籃球":
         demo_spread = (2.5, 4.5, 6.5, 8.5)
         spread = demo_spread[(pick >> 5) % len(demo_spread)]
-        handicap = f"{winner} -{spread:g} 分（情境模擬）"
+        handicap = (f"{winner} -{spread:g} 分（情境模擬）" if winner else "資料不足，暫無推薦")
         handicap_reason = f"須至少贏 {spread:g} 分以上才會過盤；考慮節奏、輪替、傷停與末節犯規。"
     else:
-        handicap = f"{winner} -1.5 分（情境模擬）"
+        handicap = (f"{winner} -1.5 分（情境模擬）" if winner else "資料不足，暫無推薦")
         handicap_reason = "需贏 2 分以上才會過盤；應核實先發投手、牛棚、打線與主客場。"
     # Always show both sections. Distinguish verified facts from scouting criteria.
     if team_history:
         focus = team_history
     elif sport == "足球":
-        focus = f"{winner}｜歷史戰績尚未核實；本場可留意控球、射門及近期攻守表現。"
+        focus = f"歷史戰績尚未核實；本場可留意控球、射門及近期攻守表現。"
     elif sport == "籃球":
         league_name = league or "NBA"
-        focus = f"{winner}｜{league_name} 歷史戰績尚未核實；本場可留意近況、節奏、進攻效率與籃板。"
+        focus = f"{league_name} 歷史戰績尚未核實；本場可留意近況、節奏、進攻效率與籃板。"
     else:
-        focus = f"{winner}｜歷史戰績尚未核實；本場可留意近期勝敗、先發投手與牛棚。"
+        focus = f"歷史戰績尚未核實；本場可留意近期勝敗、先發投手與牛棚。"
     if star_players:
         result = star_players
     elif sport == "足球":
-        result = f"{winner}｜主力名單尚未核實；重點觀察先發前鋒、中場核心與門將。"
+        result = f"主力名單尚未核實；重點觀察先發前鋒、中場核心與門將。"
     elif sport == "籃球":
         league_name = league or "NBA"
-        result = f"{winner}｜{league_name} 主力名單尚未核實；重點觀察控衛、得分主力、禁區球員與輪替深度。"
+        result = f"{league_name} 主力名單尚未核實；重點觀察控衛、得分主力、禁區球員與輪替深度。"
     else:
-        result = f"{winner}｜主力名單尚未核實；重點觀察先發投手、中心打者與終結者。"
+        result = f"主力名單尚未核實；重點觀察先發投手、中心打者與終結者。"
     accent = {"足球": "#0D9488", "籃球": "#EA580C", "棒球": "#6366F1"}[sport]
     def txt(value, size="sm", color="#334155", weight="regular"):
         return {"type": "text", "text": value, "size": size, "color": color, "weight": weight, "wrap": True}
@@ -444,7 +444,7 @@ def offline_analysis(sport, matchup=None, team_history=None, star_players=None, 
                          "cornerRadius": "12px", "paddingAll": "13px", "spacing": "sm",
                          "contents": [
                              txt("✦ 模擬推薦方向", "md", "#FDE68A", "bold"),
-                             txt(f"🏆 獨贏  {winner}", "md", "#FFFFFF", "bold"),
+                             txt(f"🏆 獨贏  {winner or '資料不足，暫無推薦'}", "md", "#FFFFFF", "bold"),
                              {"type": "separator", "color": "#475569"},
                              txt(f"📊 大小分  {total}", "md", "#FFFFFF", "bold"),
                              {"type": "separator", "color": "#475569"},
