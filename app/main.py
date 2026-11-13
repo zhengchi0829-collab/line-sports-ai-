@@ -67,6 +67,14 @@ async def startup_probe(app):
                               ui.team_zh, on_date=check_now.date(), now=check_now)
         dated_command = dated["contents"]["contents"][0]["footer"]["contents"][0]["action"]["text"]
         assert check_now.date().isoformat() in dated_command
+        # Sportsbook prices must appear only in the explicitly selected odds menu.
+        odds_ui = odds_category_menu()
+        odds_actions = str(odds_ui)
+        assert "台灣運彩賠率" in odds_actions and "娛樂平台賠率" in odds_actions
+        no_odds = await app.state.controller.reply("分析NBA 未驗證主隊 vs 未驗證客隊")
+        assert not any("獨贏賠率" in str(card) or "真實盤口" in str(card)
+                       or "盤口更新：" in str(card) for card in no_odds)
+        log.info("odds_menu_exclusive_checks=passed version=%s", VERSION)
         log.info("date_filter_checks=passed version=%s", VERSION)
         log.info("startup_ui_checks=passed version=%s", VERSION)
         token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "").strip()
