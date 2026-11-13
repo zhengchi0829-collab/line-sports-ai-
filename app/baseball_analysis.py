@@ -173,10 +173,125 @@ async def verified_cpbl_analysis(client, home, away, translate=None):
         logger.warning("cpbl_history_unavailable kind=%s",type(exc).__name__)
         return UNAVAILABLE
 
+ARCHIVES = {
+    "NPB": "https://raw.githubusercontent.com/dentearl/npb-data/main/data/npb/{year}.json",
+    "KBO": "https://raw.githubusercontent.com/dentearl/kbo-data/main/data/kbo/{year}.json",
+}
+
+async def verified_asian_baseball_analysis(client, league, home, away, translate=None):
+    """Compare actual completed games from the selected league's dated archive.
+
+    The archive is a third-party mirror, not official live odds or lineup data.
+    Never mix another league's data or pretend that listed players are confirmed starters.
+    """
+    year = datetime.now(timezone.utc).year
+    try:
+        responses = await asyncio.gather(*(
+            client.get(ARCHIVES[league].format(year=y), timeout=4)
+            for y in (year, year - 1)), return_exceptions=True)
+        rows = []
+        for response in responses:
+            if isinstance(response, BaseException) or response.status_code != 200:
+                continue
+            value = response.json()
+            if isinstance(value, list):
+                rows.extend(value)
+        teams = {}
+        for game in rows:
+            if not isinstance(game, dict):
+                continue
+            for side in ("home", "away"):
+                team = ((game.get("teams") or {}).get(side) or {}).get("team") or {}
+                if team.get("id") is not None and team.get("name"):
+                    teams[str(team["id"])] = team["name"]
+        selected = []
+        for wanted in (home, away):
+            ranked = sorted(
+                ((similarity(name, wanted, translate), tid, name)
+                 for tid, name in teams.items()), reverse=True)
+            if not ranked or ranked[0][0] < 0.74:
+                logger.warning("asian_baseball_unknown_team league=%s team=%s", league, wanted[:35])
+                return UNAVAILABLE
+            selected.append(ranked[0])
+        if selected[0][1] == selected[1][1]:
+            return UNAVAILABLE
+        groups = []
+        for _, tid, _ in selected:
+            matches = []
+            for game in rows:
+                if not isinstance(game, dict):
+                    continue
+                status = game.get("status") or {}
+                if str(status.get("abstractGameState", "")).lower() not in ("f", "final"):
+                    continue
+                sides = game.get("teams") or {}
+                h, a = sides.get("home") or {}, sides.get("away") or {}
+                home_id = str((h.get("team") or {}).get("id"))
+                away_id = str((a.get("team") or {}).get("id"))
+                if tid not in (home_id, away_id):
+                    continue
+                own, other = (h, a) if tid == home_id else (a, h)
+                mine, theirs = verified_score(own), verified_score(other)
+                if mine is None or theirs is None:
+                    continue
+                date = str(game.get("gameDate") or "")
+                if date[:10] > datetime.now(timezone.utc).date().isoformat():
+                    continue
+                result = "W" if mine > theirs else "L" if mine < theirs else "D"
+                matches.append((date, result, mine, theirs))
+            matches.sort(key=lambda x: x[0], reverse=True)
+            groups.append(matches[:5])
+        if any(len(group) < 5 for group in groups):
+            logger.warning("asian_baseball_insufficient_history league=%s", league)
+            return UNAVAILABLE
+        records = [(sum(g[1] == "W" for g in group),
+                    sum(g[1] == "D" for g in group),
+                    sum(g[1] == "L" for g in group)) for group in groups]
+        diff = [sum(g[2] - g[3] for g in group) / 5 for group in groups]
+        tied = (records[0][0], diff[0]) == (records[1][0], diff[1])
+        fav_index = 0 if (records[0][0], diff[0]) > (records[1][0], diff[1]) else 1
+        winner = None if tied else (home, away)[fav_index]
+        def record_text(name, record, matches):
+            wins, draws, losses = record
+            return (f"{name}｜最近5場 {wins}勝{draws}和{losses}敗"
+                    f"｜歷史勝率 {wins * 20:.0f}%｜最近一戰 {matches[0][0][:10]}")
+        history = (record_text(home, records[0], groups[0]) + "\n" +
+                   record_text(away, records[1], groups[1]) +
+                   "\n近期戰績較佳：" + (winner or "雙方持平"))
+        weights = (5, 4, 3, 2, 1)
+        attack = [sum(w * g[2] for w, g in zip(weights, group)) / 15 for group in groups]
+        defense = [sum(w * g[3] for w, g in zip(weights, group)) / 15 for group in groups]
+        projected_home = (attack[0] + defense[1]) / 2
+        projected_away = (attack[1] + defense[0]) / 2
+        projected_total = projected_home + projected_away
+        projected_margin = projected_home - projected_away
+        average_total = sum(g[2] + g[3] for group in groups for g in group) / 10
+        reference = math.floor(average_total) + 0.5
+        tendency = ("偏大" if projected_total > reference + 0.15 else
+                    "偏小" if projected_total < reference - 0.15 else "接近參考線")
+        favored = home if projected_margin >= 0 else away
+        metrics = {
+            "total": f"{tendency} {reference:.1f} 分（歷史模型線）｜預估 {projected_total:.1f} 分",
+            "handicap": f"{favored} -1.5 分（歷史模型，"
+                        + ("差距足夠" if abs(projected_margin) > 1.8 else "差距不足") + "）",
+            "expected_total": projected_total,
+            "expected_margin": projected_margin,
+        }
+        players = (f"{league}｜該資料來源只核實賽程與比分，"
+                   "尚無可核實的先發投手、登錄球員或傷停名單。")
+        return history, players, winner, metrics
+    except (httpx.HTTPError, TypeError, ValueError, KeyError, IndexError) as exc:
+        logger.warning("asian_baseball_history_error league=%s kind=%s",
+                       league, type(exc).__name__)
+        return UNAVAILABLE
+
+
 async def verified_baseball_analysis(client, league, home, away, translate=None):
     """Return (form, roster, winner, metrics) with no fake observed statistics."""
     if league == "CPBL":
         return await verified_cpbl_analysis(client,home,away,translate)
+    if league in ARCHIVES:
+        return await verified_asian_baseball_analysis(client, league, home, away, translate)
     sport_ids = SPORT_IDS.get(league)
     if sport_ids is None:
         return UNAVAILABLE
