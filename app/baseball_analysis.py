@@ -162,6 +162,11 @@ async def verified_cpbl_analysis(client, home, away, translate=None, as_of: date
                  "handicap":f"{favored} -1.5 分（模型"+("支持" if abs(margin)>1.8 else "差距不足")+"）",
                  "expected_total":total,"expected_margin":margin}
         named=[]
+        # Season-end leaders are not evidence of a historical game's starting lineup.
+        if as_of and as_of < datetime.now(timezone.utc).date():
+            return (history,
+                    "該日期的賽前球員資料未核實；不使用賽季最終排行榜冒充當天資訊。",
+                    team, metrics)
         for group in (document.get("leaders") or {}).values():
             if not isinstance(group,dict):continue
             for category,leaders in group.items():
@@ -438,11 +443,14 @@ async def verified_baseball_analysis(client, league, home, away, translate=None,
                 return names[:4]
             except (httpx.HTTPError, ValueError, TypeError, KeyError):
                 return []
-        rosters = await asyncio.gather(*(fetch_roster(entry) for entry in matches))
-        players = "\n".join(
-            f"{name}｜登錄球員（非確定先發）：{', '.join(roster)}" if roster
-            else f"{name}｜暫無可核實登錄名單"
-            for name, roster in zip((home, away), rosters))
+        if as_of and as_of < datetime.now(timezone.utc).date():
+            players = "所選歷史日期的賽前登錄／先發球員未核實，不使用目前名單替代。"
+        else:
+            rosters = await asyncio.gather(*(fetch_roster(entry) for entry in matches))
+            players = "\n".join(
+                f"{name}｜目前登錄球員（非確定先發）：{', '.join(roster)}" if roster
+                else f"{name}｜暫無可核實登錄名單"
+                for name, roster in zip((home, away), rosters))
         return form,players,winner,metrics
     except (httpx.HTTPError, ValueError, TypeError, KeyError, IndexError) as exc:
         logger.warning("baseball_form_error league=%s kind=%s",league,type(exc).__name__)
