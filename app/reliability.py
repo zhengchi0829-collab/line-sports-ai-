@@ -18,10 +18,21 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.6.40"
+VERSION = "0.6.41"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
+SOCCER_LEAGUES = {
+    "英超": ("soccer_epl", "eng.1"),
+    "西甲": ("soccer_laliga", "esp.1"),
+    "德甲": ("soccer_bundesliga", "ger.1"),
+    "義甲": ("soccer_seriea", "ita.1"),
+    "法甲": ("soccer_ligue1", "fra.1"),
+    "歐冠": ("soccer_ucl", "uefa.champions"),
+}
+SOCCER_LEAGUE_LABELS = {key: label for label, (key, _) in SOCCER_LEAGUES.items()}
+SOCCER_SLUG_LABELS = {slug: label for label, (_, slug) in SOCCER_LEAGUES.items()}
+KEYS.update({label: key for label, (key, _) in SOCCER_LEAGUES.items()})
 KEYS.update({"NBA": "basketball", "NCAA": "basketball_ncaa", "NBL": "basketball_nbl", "TPBL": "basketball_tpbl", "MLB": "baseball", "NPB": "baseball_npb", "KBO": "baseball_kbo", "CPBL": "baseball_cpbl", "MiLB": "baseball_milb"})
 DEMO_PAIRS = {
     "soccer": ("\u62dc\u4ec1\u6155\u5c3c\u9ed1", "\u591a\u7279\u8499\u5fb7"),
@@ -153,9 +164,15 @@ def parse_feed(kind: str, data: Any) -> list[Game]:
                     continue
                 h = next(c["team"] for c in comp["competitors"] if c.get("homeAway") == "home")
                 a = next(c["team"] for c in comp["competitors"] if c.get("homeAway") == "away")
-                item = Game(str(g["id"]), "basketball", "NBA", instant(g["date"]), h["displayName"],
-                            a["displayName"], h.get("logo", ""), a.get("logo", ""), "ESPN",
-                            "live" if status.get("state") == "in" else "scheduled", not comp.get("timeValid") is False)
+                is_soccer = kind.startswith("soccer_")
+                label = SOCCER_SLUG_LABELS.get(kind.removeprefix("soccer_"), "足球") if is_soccer else "NBA"
+                def espn_logo(team):
+                    logos = team.get("logos", [])
+                    return team.get("logo") or (logos[0].get("href", "") if logos else "")
+                item = Game(str(g["id"]), "soccer" if is_soccer else "basketball", label,
+                            instant(g["date"]), h["displayName"], a["displayName"],
+                            espn_logo(h), espn_logo(a), "ESPN",
+                            "live" if status.get("state") == "in" else "scheduled", comp.get("timeValid") is not False)
             if item.home.strip() and item.away.strip() and item.home != item.away:
                 out.append(item)
         except (KeyError, TypeError, ValueError, IndexError, AttributeError, StopIteration):
@@ -237,6 +254,17 @@ class Fixtures:
         if sport == "soccer":
             season = now.year if now.month >= 7 else now.year - 1
             return [("openliga", f"https://api.openligadb.de/getmatchdata/bl1/{season}", {}, "openliga")]
+        for label, (key, slug) in SOCCER_LEAGUES.items():
+            if sport == key:
+                date_range = now.strftime("%Y%m%d") + "-" + (now + timedelta(days=45)).strftime("%Y%m%d")
+                feeds = [
+                    (key + "_espn", f"https://site.api.espn.com/apis/site/v2/sports/soccer/{slug}/scoreboard",
+                     {"dates": date_range, "limit": 250}, "soccer_" + slug),
+                ]
+                if key == "soccer_bundesliga":
+                    season = now.year if now.month >= 7 else now.year - 1
+                    feeds.append(("openliga_backup", f"https://api.openligadb.de/getmatchdata/bl1/{season}", {}, "openliga"))
+                return feeds
         if sport == "basketball":
             return [
                 ("nba_schedule", "https://cdn.nba.com/static/json/staticData/scheduleLeagueV2_1.json", {}, "nba_schedule"),
@@ -355,8 +383,35 @@ def button(label: str, command: str, color="#0F766E") -> dict:
 
 
 def quick_menu() -> dict:
-    return {"items": [{"type": "action", "action": {"type": "message", "label": name, "text": name}}
-                      for name in [*SPORTS.values(), TODAY, FUTURE, MENU]]}
+    labels = [
+        ("⚽ 足球", "足球"), ("🏀 籃球", "籃球"), ("⚾ 棒球", "棒球"),
+        ("📅 今日賽事", TODAY), ("🗓️ 未來賽事", FUTURE), ("🏠 主選單", MENU),
+    ]
+    return {"items": [{"type": "action", "action": {"type": "message", "label": label, "text": cmd}}
+                      for label, cmd in labels]}
+
+
+def soccer_menu() -> dict:
+    """Six popular football competitions with separate schedules and analysis."""
+    options = [
+        ("🏴 英超｜英格蘭", "英超", "#0F766E"),
+        ("🇪🇸 西甲｜西班牙", "西甲", "#B91C1C"),
+        ("🇩🇪 德甲｜德國", "德甲", "#C2410C"),
+        ("🇮🇹 義甲｜義大利", "義甲", "#0369A1"),
+        ("🇫🇷 法甲｜法國", "法甲", "#7C3AED"),
+        ("🏆 歐冠｜冠軍聯賽", "歐冠", "#334155"),
+    ]
+    return {"type": "flex", "altText": "足球聯賽｜英超、西甲、德甲、義甲、法甲、歐冠",
+            "quickReply": quick_menu(), "contents": {"type": "bubble", "size": "kilo",
+                "header": {"type": "box", "layout": "vertical", "backgroundColor": "#0F172A",
+                           "paddingAll": "16px", "contents": [
+                               text("⚽ 足球賽事", "lg", "#FFFFFF", "bold"),
+                               text("選擇聯賽，查看賽程及立即分析", "sm", "#CBD5E1")]},
+                "body": {"type": "box", "layout": "vertical", "spacing": "sm",
+                         "paddingAll": "14px", "contents": [
+                             *(button(label, cmd, color) for label, cmd, color in options),
+                             button("🏠 返回主選單", MENU, "#334155"),
+                         ]}}}
 
 
 def league_menu() -> dict:
@@ -397,7 +452,7 @@ def baseball_menu() -> dict:
 
 
 def notice(sport: str, snapshot: Snapshot) -> dict:
-    name = SPORTS.get(sport, "\u8cfd\u4e8b")
+    name = SOCCER_LEAGUE_LABELS.get(sport) or SPORTS.get(sport, "\u8cfd\u4e8b")
     failed = bool(snapshot.errors)
     a, b = DEMO_PAIRS.get(sport, DEMO_PAIRS["soccer"])
     demo = "\u6a21\u64ec\u5206\u6790" + SPORTS.get(sport, SPORTS["soccer"]) + " " + a + " vs " + b
@@ -488,8 +543,8 @@ def fixture_cards(sport: str, snapshot: Snapshot, team_name, today=False, now=No
     now = now or datetime.now(TZ)
     games = select_games(snapshot.games, now, today)
     if not games:
-        return notice("basketball" if sport.startswith("basketball_") else ("baseball" if sport.startswith("baseball_") else sport), snapshot)
-    colors = {"soccer": "#0F766E", "basketball": "#C2410C", "basketball_ncaa": "#B45309",
+        return notice(sport if sport.startswith("soccer_") else ("basketball" if sport.startswith("basketball_") else ("baseball" if sport.startswith("baseball_") else sport)), snapshot)
+    colors = {"soccer": "#0F766E", "soccer_epl": "#0F766E", "soccer_laliga": "#B91C1C", "soccer_bundesliga": "#C2410C", "soccer_seriea": "#0369A1", "soccer_ligue1": "#7C3AED", "soccer_ucl": "#334155", "basketball": "#C2410C", "basketball_ncaa": "#B45309",
               "basketball_nbl": "#0369A1", "basketball_tpbl": "#7C3AED", "baseball": "#4F46E5", "baseball_npb": "#B91C1C",
               "baseball_kbo": "#0369A1", "baseball_cpbl": "#047857", "baseball_milb": "#92400E"}
     accent = colors[sport]
@@ -520,15 +575,15 @@ def fixture_cards(sport: str, snapshot: Snapshot, team_name, today=False, now=No
         stamp = snapshot.fetched.strftime("%m/%d %H:%M") if snapshot.fetched else "-"
         bubbles.append({"type": "bubble", "size": "kilo",
             "header": {"type": "box", "layout": "vertical", "backgroundColor": "#0F172A", "paddingAll": "14px",
-                       "spacing": "xs", "contents": [text((basketball_league_label(sport) if sport.startswith("basketball") else (baseball_league_label(sport) if sport.startswith("baseball") else g.league)) + " | " + ("籃球" if sport.startswith("basketball") else ("棒球" if sport.startswith("baseball") else SPORTS[sport])), "xs", "#CBD5E1"),
+                       "spacing": "xs", "contents": [text((basketball_league_label(sport) if sport.startswith("basketball") else (baseball_league_label(sport) if sport.startswith("baseball") else g.league)) + " | " + ("籃球" if sport.startswith("basketball") else ("棒球" if sport.startswith("baseball") else ("足球" if sport.startswith("soccer") else SPORTS[sport]))), "xs", "#CBD5E1"),
                        text(label, "xl", "#FFFFFF", "bold"), text("\u53f0\u7063\u6642\u9593 | " + subtitle, "xs", "#CBD5E1")]},
             "body": {"type": "box", "layout": "vertical", "backgroundColor": "#F4F7FB", "paddingAll": "14px",
                      "spacing": "sm", "contents": [team_row(home, home_logo, "\u4e3b\u968a"), text("VS", color=accent, weight="bold"),
                      team_row(away, away_logo, "\u5ba2\u968a"), text(g.source + " | " + stamp +
                      (" | \u5feb\u53d6\u8cc7\u6599" if snapshot.stale else ""), "xxs", "#64748B")]},
             "footer": {"type": "box", "layout": "vertical", "paddingAll": "10px", "contents": [
-                button("\u7acb\u5373\u5206\u6790", (f"\u5206\u6790{basketball_league_label(sport)} {home} vs {away}" if sport.startswith("basketball") else (f"\u5206\u6790{baseball_league_label(sport)} {home} vs {away}" if sport.startswith("baseball") else f"\u5206\u6790{SPORTS[sport]} {home} vs {away}")), accent)]}})
-    return {"type": "flex", "altText": (basketball_league_label(sport) if sport.startswith("basketball") else (baseball_league_label(sport) if sport.startswith("baseball") else SPORTS[sport])) + "\u8fd1\u671f\u8cfd\u4e8b\uff5c\u9ede\u9078\u5206\u6790",
+                button("\u7acb\u5373\u5206\u6790", (f"\u5206\u6790{basketball_league_label(sport)} {home} vs {away}" if sport.startswith("basketball") else (f"\u5206\u6790{baseball_league_label(sport)} {home} vs {away}" if sport.startswith("baseball") else f"\u5206\u6790{SOCCER_LEAGUE_LABELS.get(sport, SPORTS.get(sport, sport))} {home} vs {away}")), accent)]}})
+    return {"type": "flex", "altText": (basketball_league_label(sport) if sport.startswith("basketball") else (baseball_league_label(sport) if sport.startswith("baseball") else SOCCER_LEAGUE_LABELS.get(sport, SPORTS.get(sport, sport)))) + "\u8fd1\u671f\u8cfd\u4e8b\uff5c\u9ede\u9078\u5206\u6790",
             "quickReply": quick_menu(), "contents": {"type": "carousel", "contents": bubbles}}
 
 
@@ -600,6 +655,8 @@ class Controller:
         if demo:
             raw = raw[2:]
         compact = re.sub(r"\s+", "", raw)
+        if compact == "足球":
+            return [soccer_menu()]
         if compact == "籃球":
             return [league_menu()]
         if compact == "棒球":
@@ -611,17 +668,18 @@ class Controller:
             snapshots = await asyncio.gather(*(self.fixtures.get(key) for key in SPORTS), return_exceptions=True)
             return [fixture_cards(key, snap if isinstance(snap, Snapshot) else Snapshot(errors=["internal_error"]),
                                   self.ui.team_zh, today=compact == TODAY) for key, snap in zip(SPORTS, snapshots)]
-        match = re.match(r"^\s*分析\s*(足球|籃球|棒球|NBA|NCAA|NBL|TPBL|MLB|NPB|KBO|CPBL|MiLB)\s*(.*)$", raw, re.S)
+        match = re.match(r"^\s*分析\s*(英超|西甲|德甲|義甲|法甲|歐冠|足球|籃球|棒球|NBA|NCAA|NBL|TPBL|MLB|NPB|KBO|CPBL|MiLB)\s*(.*)$", raw, re.S)
         if match:
             sport, matchup = match.groups()
             basketball_league = sport if sport in ("NBA", "NCAA", "NBL", "TPBL") else None
             baseball_league = sport if sport in ("MLB", "NPB", "KBO", "CPBL", "MiLB") else None
-            league = basketball_league or baseball_league
-            base_sport = "籃球" if basketball_league else ("棒球" if baseball_league else sport)
+            soccer_league = sport if sport in SOCCER_LEAGUES else None
+            league = basketball_league or baseball_league or soccer_league
+            base_sport = "籃球" if basketball_league else ("棒球" if baseball_league else ("足球" if soccer_league else sport))
             if not matchup:
                 key = {"NBA": "basketball", "NCAA": "basketball_ncaa", "NBL": "basketball_nbl", "TPBL": "basketball_tpbl",
                        "MLB": "baseball", "NPB": "baseball_npb", "KBO": "baseball_kbo",
-                       "CPBL": "baseball_cpbl", "MiLB": "baseball_milb"}.get(league) if league else KEYS[sport]
+                       "CPBL": "baseball_cpbl", "MiLB": "baseball_milb", **{name: data[0] for name, data in SOCCER_LEAGUES.items()}}.get(league) if league else KEYS[sport]
                 return [fixture_cards(key, await self.fixtures.get(key), self.ui.team_zh)]
             parts = re.split(r"\s*(?:\bvs\.?\b|\u5c0d\u6230|\u5c0d|\uff0d|\u2014)\s*", matchup, maxsplit=1, flags=re.I)
             if len(parts) == 2 and all(p.strip() for p in parts):

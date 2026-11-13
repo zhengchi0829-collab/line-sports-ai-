@@ -66,6 +66,12 @@ async def startup_probe(app):
 
 REFRESH_KEYS = (
     "soccer",
+    "soccer_epl",
+    "soccer_laliga",
+    "soccer_bundesliga",
+    "soccer_seriea",
+    "soccer_ligue1",
+    "soccer_ucl",
     "basketball",
     "basketball_ncaa",
     "basketball_nbl",
