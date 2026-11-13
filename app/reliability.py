@@ -22,7 +22,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.6.67"
+VERSION = "0.6.68"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -1114,12 +1114,15 @@ class Controller:
                     if actual_market:
                         source_title=actual_market["source"]+"｜"+actual_market["book"]
                         cells[0]["text"]="✦ 真實盤口｜"+source_title
-                        if actual_market.get("home_price") and actual_market.get("away_price"):
-                            cells[1]["text"]=("🏆 獨贏賠率  主 "+f"{actual_market['home_price']:.2f}"+
-                                              "／客 "+f"{actual_market['away_price']:.2f}"+
-                                              (("／和 "+f"{actual_market['draw_price']:.2f}") if actual_market.get("draw_price") else ""))
+                        # Keep recommendation; display sportsbook odds separately.
+                        if actual_market.get("home_price") is not None and actual_market.get("away_price") is not None:
+                            odds_text = ("💹 獨贏賠率  主 " + f"{actual_market['home_price']:.2f}" +
+                                         "／客 " + f"{actual_market['away_price']:.2f}" +
+                                         (("／和 " + f"{actual_market['draw_price']:.2f}")
+                                          if actual_market.get("draw_price") is not None else ""))
                         else:
-                            cells[1]["text"]="🏆 獨贏賠率  此來源未提供"
+                            odds_text = "💹 獨贏賠率  此來源未提供"
+                        cells.insert(2, text(odds_text, "sm", "#CBD5E1"))
                         if actual_market.get("total") is not None:
                             line=actual_market["total"]
                             projected=(metrics or {}).get("expected_total")
@@ -1127,9 +1130,9 @@ class Controller:
                             over=actual_market.get("over_price")
                             under=actual_market.get("under_price")
                             prices=(f" 大 {over:.2f}" if over is not None else "") + (f"／小 {under:.2f}" if under is not None else "")
-                            cells[3]["text"]=f"📊 大小盤 {line:g}{prices}｜"+direction
+                            cells[4]["text"]=f"📊 大小盤 {line:g}{prices}｜"+direction
                         else:
-                            cells[3]["text"]="📊 大小盤  此來源未提供"
+                            cells[4]["text"]="📊 大小盤  此來源未提供"
                         if actual_market.get("spread") is not None:
                             line=actual_market["spread"]
                             projected=(metrics or {}).get("expected_margin")
@@ -1137,9 +1140,9 @@ class Controller:
                             sh=actual_market.get("spread_home_price")
                             sa=actual_market.get("spread_away_price")
                             prices=(f" 主 {sh:.2f}" if sh is not None else "")+(f"／客 {sa:.2f}" if sa is not None else "")
-                            cells[5]["text"]=f"⚖️ 讓球 主隊 {line:+g}{prices}｜"+direction
+                            cells[6]["text"]=f"⚖️ 讓球 主隊 {line:+g}{prices}｜"+direction
                         else:
-                            cells[5]["text"]="⚖️ 讓球  此來源未提供"
+                            cells[6]["text"]="⚖️ 讓球  此來源未提供"
                         cells.append(text("盤口更新："+str(actual_market.get("updated") or "未提供")[:19],"xs","#CBD5E1"))
                     else:
                         cells[0]["text"]="✦ 歷史模型參考｜無已核實盤口"
