@@ -7,7 +7,7 @@ import difflib
 import logging
 import math
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import httpx
 
@@ -81,7 +81,7 @@ CPBL_TEAMS = {
 }
 
 
-async def verified_cpbl_analysis(client, home, away, translate=None):
+async def verified_cpbl_analysis(client, home, away, translate=None, as_of: date | None = None):
     """Use the dated CPBL 2026 snapshot. Historical only; never call it live."""
     try:
         response = await client.get(
@@ -104,12 +104,16 @@ async def verified_cpbl_analysis(client, home, away, translate=None):
         a_score,a_code=match_code(away)
         if min(h_score,a_score)<0.72 or not h_code or not a_code or h_code==a_code:
             return UNAVAILABLE
+        cutoff = min(as_of, datetime.now(timezone.utc).date() + timedelta(days=1)) if as_of else (
+            datetime.now(timezone.utc).date() + timedelta(days=1))
         groups=[]
         for code in (h_code,a_code):
             played=[]
             for game in document.get("games",[]):
                 if not isinstance(game,dict):continue
                 if str(game.get("status","")).lower() not in ("final","finished"):
+                    continue
+                if str(game.get("date", ""))[:10] >= cutoff.isoformat():
                     continue
                 if code not in (game.get("home"),game.get("away")):continue
                 try:
@@ -178,13 +182,16 @@ ARCHIVES = {
     "KBO": "https://raw.githubusercontent.com/dentearl/kbo-data/main/data/kbo/{year}.json",
 }
 
-async def verified_asian_baseball_analysis(client, league, home, away, translate=None):
+async def verified_asian_baseball_analysis(client, league, home, away, translate=None,
+                                          as_of: date | None = None):
     """Compare actual completed games from the selected league's dated archive.
 
     The archive is a third-party mirror, not official live odds or lineup data.
     Never mix another league's data or pretend that listed players are confirmed starters.
     """
-    year = datetime.now(timezone.utc).year
+    cutoff = min(as_of, datetime.now(timezone.utc).date() + timedelta(days=1)) if as_of else (
+        datetime.now(timezone.utc).date() + timedelta(days=1))
+    year = cutoff.year
     try:
         responses = await asyncio.gather(*(
             client.get(ARCHIVES[league].format(year=y), timeout=4)
@@ -235,7 +242,7 @@ async def verified_asian_baseball_analysis(client, league, home, away, translate
                 if mine is None or theirs is None:
                     continue
                 date = str(game.get("gameDate") or "")
-                if date[:10] > datetime.now(timezone.utc).date().isoformat():
+                if date[:10] >= cutoff.isoformat():
                     continue
                 result = "W" if mine > theirs else "L" if mine < theirs else "D"
                 matches.append((date, result, mine, theirs))
@@ -286,12 +293,15 @@ async def verified_asian_baseball_analysis(client, league, home, away, translate
         return UNAVAILABLE
 
 
-async def verified_baseball_analysis(client, league, home, away, translate=None, team_ids=None, sport_id=None):
+async def verified_baseball_analysis(client, league, home, away, translate=None,
+                                     team_ids=None, sport_id=None,
+                                     as_of: date | None = None):
     """Return (form, roster, winner, metrics) with no fake observed statistics."""
     if league == "CPBL":
-        return await verified_cpbl_analysis(client,home,away,translate)
+        return await verified_cpbl_analysis(client,home,away,translate,as_of=as_of)
     if league in ARCHIVES:
-        return await verified_asian_baseball_analysis(client, league, home, away, translate)
+        return await verified_asian_baseball_analysis(client, league, home, away, translate,
+                                                       as_of=as_of)
     sport_ids = SPORT_IDS.get(league)
     if sport_ids is None:
         return UNAVAILABLE
@@ -333,8 +343,9 @@ async def verified_baseball_analysis(client, league, home, away, translate=None,
         if matches[0][0]["id"] == matches[1][0]["id"]:
             return UNAVAILABLE
         now=datetime.now(timezone.utc)
-        start=(now-timedelta(days=230)).date().isoformat()
-        end=now.date().isoformat()
+        end_day = min(as_of - timedelta(days=1), now.date()) if as_of else now.date()
+        start=(end_day-timedelta(days=240)).isoformat()
+        end=end_day.isoformat()
         async def schedule(entry):
             team, sid = entry
             params = {"teamId": team["id"], "startDate": start, "endDate": end}
