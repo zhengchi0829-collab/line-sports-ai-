@@ -698,22 +698,84 @@ def league_menu() -> dict:
 
 
 def baseball_menu() -> dict:
-    """Second-level league chooser opened from the baseball button."""
-    return {"type": "flex", "altText": "選擇 MLB、NPB、KBO、CPBL 或 MiLB", "quickReply": quick_menu(),
-            "contents": {"type": "bubble", "size": "kilo",
-                "header": {"type": "box", "layout": "vertical", "backgroundColor": "#0F172A",
-                           "paddingAll": "16px", "contents": [
-                               text("⚾ 棒球入口", "lg", "#FFFFFF", "bold"),
-                               text("選擇要查看的聯盟", "sm", "#CBD5E1")]},
-                "body": {"type": "box", "layout": "vertical", "spacing": "sm", "paddingAll": "14px",
-                         "contents": [
-                             button("⚾ MLB｜美國職棒", "MLB", "#7C3AED"),
-                             button("⚾ NPB｜日本職棒", "NPB", "#B91C1C"),
-                             button("⚾ KBO｜韓國職棒", "KBO", "#0369A1"),
-                             button("⚾ CPBL｜中華職棒", "CPBL", "#047857"),
-                             button("⚾ MiLB｜美國小聯盟", "MiLB", "#92400E"),
-                             button("🏠 回主選單", MENU, "#334155")
-                         ]}}}
+    """Cyan holographic HUD league chooser, matching the approved first preview.
+
+    Interactive Flex boxes use native LINE message actions, not image-only buttons.
+    """
+    def league_button(label: str, command: str, number: str) -> dict:
+        return {
+            "type": "box", "layout": "horizontal", "alignItems": "center",
+            "justifyContent": "space-between", "height": "55px",
+            "paddingStart": "13px", "paddingEnd": "12px",
+            "backgroundColor": "#075491", "borderColor": "#12DCFF",
+            "borderWidth": "2px", "cornerRadius": "12px", "spacing": "sm",
+            "action": {"type": "message", "label": label[:20], "text": command},
+            "contents": [
+                {"type": "box", "layout": "vertical", "width": "25px",
+                 "justifyContent": "center", "contents": [
+                    text(number, "xs", "#9FFBFF", "bold")]},
+                {"type": "box", "layout": "vertical", "flex": 1,
+                 "justifyContent": "center", "contents": [
+                    text(label, "md", "#FFFFFF", "bold")]},
+                text("❯", "lg", "#8EF8FF", "bold"),
+            ],
+        }
+
+    rows = [
+        league_button("MLB｜美國職棒", "MLB", "⚾"),
+        league_button("NPB｜日本職棒", "NPB", "⚾"),
+        league_button("KBO｜韓國職棒", "KBO", "⚾"),
+        league_button("CPBL｜中華職棒", "CPBL", "⚾"),
+        league_button("MiLB｜美國小聯盟", "MiLB", "⚾"),
+    ]
+    back = {
+        "type": "box", "layout": "horizontal", "height": "50px",
+        "alignItems": "center", "justifyContent": "center",
+        "paddingAll": "10px", "backgroundColor": "#263D56",
+        "borderColor": "#75B4D4", "borderWidth": "1px",
+        "cornerRadius": "12px",
+        "action": {"type": "message", "label": "返回主選單", "text": MENU},
+        "contents": [text("⌂  返回主選單  ❯", "md", "#F5FAFF", "bold")],
+    }
+    return {
+        "type": "flex", "altText": "⚾ 棒球入口｜全息科技選單｜選擇 MLB、NPB、KBO、CPBL 或 MiLB",
+        "quickReply": quick_menu(),
+        "contents": {
+            "type": "bubble", "size": "kilo",
+            "styles": {"header": {"backgroundColor": "#061425"},
+                       "body": {"backgroundColor": "#061425"}},
+            "header": {
+                "type": "box", "layout": "vertical", "spacing": "sm",
+                "paddingAll": "16px", "backgroundColor": "#071A2D",
+                "contents": [
+                    {"type": "box", "layout": "horizontal", "alignItems": "center",
+                     "justifyContent": "space-between", "contents": [
+                        text("H Z  /  SPORTS AI", "xs", "#28E7FF", "bold"),
+                        text("●  ONLINE", "xxs", "#8AF6FF", "bold"),
+                    ]},
+                    {"type": "separator", "color": "#16DFFF", "margin": "sm"},
+                    text("⚾  棒球入口", "xl", "#FFFFFF", "bold"),
+                    text("選擇聯盟與功能", "md", "#55EFFF"),
+                    {"type": "box", "layout": "horizontal", "margin": "sm",
+                     "backgroundColor": "#103B5E", "cornerRadius": "6px",
+                     "paddingAll": "8px", "contents": [
+                         text("◉  HOLOGRAPHIC LEAGUE CONTROL", "xxs",
+                              "#A0F9FF", "bold"),
+                     ]},
+                ],
+            },
+            "body": {
+                "type": "box", "layout": "vertical", "spacing": "md",
+                "paddingAll": "15px", "backgroundColor": "#061425",
+                "contents": rows + [
+                    {"type": "separator", "color": "#174F74", "margin": "sm"},
+                    back,
+                    text("BASEBALL  /  AI MATCH ANALYSIS", "xxs",
+                         "#5DA9C6", "bold"),
+                ],
+            },
+        },
+    }
 
 
 def notice(sport: str, snapshot: Snapshot) -> dict:
