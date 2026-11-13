@@ -344,7 +344,26 @@ async def verified_baseball_analysis(client, league, home, away, translate=None,
                                   timeout=7 if league == "MiLB" else 4)
             resp.raise_for_status()
             return finished_matches(resp.json(), team["id"])
-        games = await asyncio.gather(*(schedule(t) for t in matches),return_exceptions=True)
+        if league == "MiLB" and direct_ids and sport_id in sport_ids:
+            # Query the entire verified level schedule once: some MiLB teamId
+            # filters fail even when their level-wide schedule works.
+            try:
+                response = await client.get(
+                    base + "/schedule",
+                    params={"sportId": sport_id, "startDate": start, "endDate": end},
+                    timeout=8)
+                response.raise_for_status()
+                payload = response.json()
+                games = [finished_matches(payload, team["id"]) for team, _ in matches]
+                logger.info("milb_level_history sport_id=%s team_games=%s",
+                            sport_id, [len(group) for group in games])
+            except (httpx.HTTPError, ValueError, TypeError, KeyError) as exc:
+                logger.warning("milb_level_history_unavailable sport_id=%s kind=%s status=%s",
+                               sport_id, type(exc).__name__,
+                               getattr(getattr(exc, "response", None), "status_code", None))
+                return UNAVAILABLE
+        else:
+            games = await asyncio.gather(*(schedule(t) for t in matches),return_exceptions=True)
         if any(isinstance(g,BaseException) for g in games):
             issues = []
             for index, result in enumerate(games):
