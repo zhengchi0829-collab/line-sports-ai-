@@ -22,7 +22,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.6.76"
+VERSION = "0.7.0"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -706,6 +706,8 @@ def baseball_menu() -> dict:
                                text("選擇要查看的聯盟", "sm", "#CBD5E1")]},
                 "body": {"type": "box", "layout": "vertical", "spacing": "sm", "paddingAll": "14px",
                          "contents": [
+                             button("📅 今日棒球賽事", TODAY + "棒球", "#0F766E"),
+                             button("📆 指定日期賽事", SPECIFIED, "#334155"),
                              button("⚾ MLB｜美國職棒", "MLB", "#7C3AED"),
                              button("⚾ NPB｜日本職棒", "NPB", "#B91C1C"),
                              button("⚾ KBO｜韓國職棒", "KBO", "#0369A1"),
@@ -730,17 +732,10 @@ def notice(sport: str, snapshot: Snapshot) -> dict:
                         "contents":[text(info),text("輸入格式：分析"+league+" 主隊 vs 客隊","sm"),
                                     text("僅使用該聯盟已核實的歷史比分，資料不足不虛構推薦。","xs")]},
                     "footer":{"type":"box","layout":"vertical","spacing":"sm",
-                        "contents":([
-                            button("📈 歷史戰績分析示例",
-                                   "分析"+league+" "+{
-                                       "MLB":"洛杉磯道奇 vs 紐約洋基",
-                                       "NPB":"讀賣巨人 vs 阪神虎",
-                                       "KBO":"起亞虎 vs SSG登陸者",
-                                       "CPBL":"中信兄弟 vs 統一7-ELEVEn獅"
-                                   }[league], "#7C3AED")
-                        ] if league in ("MLB","NPB","KBO","CPBL") else []) +
-                        [button("🔄 重新查詢賽程",league),
-                         button("⚾ 返回棒球分類","棒球","#334155")]}}}
+                        "contents":[button("📅 查詢今日聯盟賽事", TODAY + league, "#0F766E"),
+                                    button("📆 指定日期賽事", SPECIFIED, "#7C3AED"),
+                                    button("🔄 查詢近期賽程", league, "#334155"),
+                                    button("⚾ 返回棒球分類", "棒球", "#334155")]}}}
     name = SOCCER_LEAGUE_LABELS.get(sport) or SPORTS.get(sport, "\u8cfd\u4e8b")
     failed = bool(snapshot.errors)
     a, b = DEMO_PAIRS.get(sport, DEMO_PAIRS["soccer"])
