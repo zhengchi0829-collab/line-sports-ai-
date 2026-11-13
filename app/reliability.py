@@ -1309,29 +1309,80 @@ class Controller:
                        "MLB": "baseball", "NPB": "baseball_npb", "KBO": "baseball_kbo",
                        "CPBL": "baseball_cpbl", "MiLB": "baseball_milb", **{name: data[0] for name, data in SOCCER_LEAGUES.items()}}.get(league) if league else KEYS[sport]
                 return [fixture_cards(key, await self.fixtures.get(key), self.ui.team_zh)]
-            parts = re.split(r"\s*(?:\bvs\.?\b|\u5c0d\u6230|\u5c0d|\uff0d|\u2014)\s*", matchup, maxsplit=1, flags=re.I)
+            matchup = matchup.strip()
+            requested_date = None
+            date_prefix = re.match(r"^(\d{4}-\d{2}-\d{2})\s+(.+)$", matchup, re.S)
+            if date_prefix:
+                try:
+                    requested_date = date.fromisoformat(date_prefix.group(1))
+                except ValueError:
+                    return [{"type": "text", "text": "賽事日期格式錯誤，請重新選擇。",
+                             "quickReply": quick_menu()}]
+                matchup = date_prefix.group(2).strip()
+            parts = re.split(r"\s*(?:\bvs\.?\b|\u5c0d\u6230|\u5c0d|\uff0d|\u2014)\s*",
+                             matchup, maxsplit=1, flags=re.I)
             if len(parts) == 2 and all(p.strip() for p in parts):
                 a, b = (p.strip().lstrip(".").strip()[:35] for p in parts)
-                history, players, recommended, metrics = ((None, None, None, None) if demo else
-                                                         await self.team_details(base_sport, a, b, league))
-                # Match live market odds to both teams and a verified kickoff;
-                # never substitute the historical model line for a sportsbook line.
-                actual_market = None
-                fixture_key = {"NBA":"basketball","NCAA":"basketball_ncaa","NBL":"basketball_nbl","TPBL":"basketball_tpbl",
-                               "MLB":"baseball","NPB":"baseball_npb","KBO":"baseball_kbo","CPBL":"baseball_cpbl",
-                               "MiLB":"baseball_milb", **{label:key for label,(key,_) in SOCCER_LEAGUES.items()}}.get(league)
+                fixture_key = {
+                    "NBA": "basketball", "NCAA": "basketball_ncaa",
+                    "NBL": "basketball_nbl", "TPBL": "basketball_tpbl",
+                    "MLB": "baseball", "NPB": "baseball_npb",
+                    "KBO": "baseball_kbo", "CPBL": "baseball_cpbl",
+                    "MiLB": "baseball_milb",
+                    **{label: key for label, (key, _) in SOCCER_LEAGUES.items()},
+                }.get(league)
+                def comparable(given, actual):
+                    return re.sub(r"[^\w]", "", str(given)).casefold() == (
+                        re.sub(r"[^\w]", "", str(actual)).casefold())
+                matched_game = None
                 kickoff = None
-                if fixture_key:
-                    snapshot = self.fixtures.last.get(fixture_key)
-                    if snapshot:
-                        for game in snapshot.games:
-                            def comparable(given, actual):
-                                return re.sub(r"[^\w]","",str(given)).casefold() == re.sub(r"[^\w]","",str(actual)).casefold()
-                            if ((comparable(game.home,a) or comparable(self.ui.team_zh(game.home),a))
-                                and (comparable(game.away,b) or comparable(self.ui.team_zh(game.away),b))):
-                                kickoff = game.start
-                                break
-                if not demo and league and kickoff:
+                if requested_date:
+                    if not fixture_key:
+                        return [{"type": "text",
+                                 "text": "請先選擇聯盟與日期，再點選當天的實際對戰。",
+                                 "quickReply": quick_menu()}]
+                    if not (datetime.now(TZ).date() - timedelta(days=365)
+                            <= requested_date <= datetime.now(TZ).date() + timedelta(days=365)):
+                        return [{"type": "text", "text": "只提供過去一年至未來一年的日期查詢。",
+                                 "quickReply": quick_menu()}]
+                    snapshot = await self.fixtures.on_date(fixture_key, requested_date)
+                else:
+                    snapshot = self.fixtures.last.get(fixture_key) if fixture_key else None
+                if snapshot:
+                    for game in snapshot.games:
+                        if requested_date and game.start.date() != requested_date:
+                            continue
+                        if ((comparable(game.home, a) or
+                             comparable(self.ui.team_zh(game.home), a))
+                            and (comparable(game.away, b) or
+                                 comparable(self.ui.team_zh(game.away), b))):
+                            matched_game = game
+                            kickoff = game.start
+                            break
+                if requested_date and matched_game is None:
+                    message = (f"{requested_date}｜{league} 找不到"
+                               f"「{a} vs {b}」的已核實賽程，請重新選日期及賽事。")
+                    if snapshot and snapshot.errors:
+                        message += "\n資料來源部分無法連線，賽事可能尚未更新。"
+                    return [{"type": "text", "text": message,
+                             "quickReply": quick_menu()}]
+                retrospective_other_sport = bool(
+                    requested_date and base_sport != "棒球" and
+                    (requested_date < datetime.now(TZ).date()
+                     or (matched_game and matched_game.state == "final")))
+                if demo:
+                    history, players, recommended, metrics = None, None, None, None
+                elif retrospective_other_sport:
+                    history = "該場已結束，但沒有可核實的賽前近五場資料；不使用事後戰績冒充預測。"
+                    players = "沒有可核實的該場賽前先發與傷停資料。"
+                    recommended, metrics = None, None
+                else:
+                    history, players, recommended, metrics = await self.team_details(
+                        base_sport, a, b, league, as_of=requested_date,
+                        fixture=matched_game)
+                # Only quote sportsbook odds for an identified future/live fixture.
+                actual_market = None
+                if not demo and league and kickoff and kickoff >= datetime.now(TZ):
                     configured_sources = [
                         source for source, name in (("tw","JBOT_API_TOKEN"),("platform","THE_ODDS_API_KEY"))
                         if os.getenv(name,"").strip()]
@@ -1392,12 +1443,27 @@ class Controller:
                         cells[5]["text"]="⚖️ 讓球 "+((metrics or {}).get("handicap") or "未取得實際盤口")
                 if isinstance(card, dict):
                     if league:
-                        card["contents"]["header"]["contents"][-1]["text"] = f"{league} · 對戰情境分析"
+                        header_contents = card["contents"]["header"]["contents"]
+                        header_contents[-1]["text"] = f"{league} · 已選賽事分析"
                         buttons = card["contents"].get("footer", {}).get("contents", [])
                         if buttons:
                             buttons[0]["action"]["label"] = f"🔎 其他{league}賽事"
-                            buttons[0]["action"]["text"] = league
-                    if soccer_league and not demo:
+                            buttons[0]["action"]["text"] = (
+                                SPECIFIED + requested_date.isoformat() + league
+                                if requested_date else league)
+                        if requested_date and matched_game:
+                            header_contents.append(
+                                text("📅 台灣時間 " + matched_game.start.strftime("%Y/%m/%d %H:%M"),
+                                     "xs", "#CBD5E1"))
+                            if matched_game.state == "final":
+                                header_contents.append(
+                                    text("已結束｜賽前資料回測，非賽前預測",
+                                         "xs", "#FDE68A"))
+                            elif matched_game.state == "scheduled":
+                                header_contents.append(
+                                    text("按該場日期分析｜歷史戰績不代表預測勝率",
+                                         "xs", "#CBD5E1"))
+                    if soccer_league and not demo and not requested_date:
                         fixture_key = SOCCER_LEAGUES[soccer_league][0]
                         snapshot = self.fixtures.last.get(fixture_key)
                         if snapshot is not None:
