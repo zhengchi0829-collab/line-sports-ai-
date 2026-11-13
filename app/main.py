@@ -229,27 +229,31 @@ async def dated_flow_probe(app):
             card = fixture_cards(key, Snapshot([game], snap.fetched, snap.errors,
                                                 snap.successes, snap.stale),
                                  ui.team_zh, on_date=selected)
-            command = card["contents"]["contents"][0]["footer"]["contents"][0]["action"]["text"]
-            if selected.isoformat() not in command:
-                raise AssertionError("analysis button lost its fixture date")
-            analysis = await asyncio.wait_for(ctl.reply(command), timeout=16)
-            ok = bool(analysis and analysis[0].get("type") == "flex"
-                      and selected.strftime("%Y/%m/%d")
-                      in str(analysis[0].get("contents", {}).get("header", {})))
-            if ok:
-                # The compact design no longer has the old "勝率" label/position.
-                panels = analysis[0]["contents"]["body"]["contents"]
-                history_panels = [
-                    item for item in panels if isinstance(item, dict)
-                    and item.get("type") == "box"
-                    and "近五場戰績" in str(item.get("contents", [])[:1])
-                ]
-                ok = bool(history_panels and any(
-                    "%" in str(item) and "勝" in str(item)
-                    and "資料不足" not in str(item)
-                    for item in history_panels))
-            if not ok:
-                raise AssertionError("dated analysis missing verified compact five-game record")
+            if game.state == "final":
+                bubble = card["contents"]["contents"][0]
+                if "footer" in bubble:
+                    raise AssertionError("completed fixture still offers analysis")
+                body = str(bubble["body"]["contents"])
+                expected = (f"{game.home_score}：{game.away_score}"
+                            if game.home_score is not None and game.away_score is not None
+                            else "比分未提供")
+                if expected not in body or "推薦" in body or "勝率" in body:
+                    raise AssertionError("completed fixture must show final score only")
+                command = (f"分析{league} {selected.isoformat()} "
+                           f"{game.home} vs {game.away}")
+                analysis = await asyncio.wait_for(ctl.reply(command), timeout=16)
+                result = analysis[0] if analysis else {}
+                if (result.get("type") != "flex" or
+                        expected not in str(result.get("contents", {})) or
+                        "footer" in result.get("contents", {})):
+                    raise AssertionError("old analysis action must return score only")
+            else:
+                command = card["contents"]["contents"][0]["footer"]["contents"][0]["action"]["text"]
+                if selected.isoformat() not in command:
+                    raise AssertionError("analysis button lost its fixture date")
+                analysis = await asyncio.wait_for(ctl.reply(command), timeout=16)
+                if not (analysis and analysis[0].get("type") == "flex"):
+                    raise AssertionError("future fixture missing analysis response")
             token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "").strip()
             if token:
                 response = await app.state.line_client.post(
