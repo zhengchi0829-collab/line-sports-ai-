@@ -23,7 +23,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.7.3"
+VERSION = "0.7.4"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -1470,8 +1470,10 @@ class Controller:
                     selected=datetime.now(TZ).date(), league=suffix)]
         if compact.startswith(FUTURE) and compact[len(FUTURE):] in CATEGORY_SOURCES:
             return [await self.category_fixtures(FUTURE, compact[len(FUTURE):])]
-        if compact in ("賽事分析", "檢視賠率"):
+        if compact == "檢視賠率":
             return [odds_category_menu()]
+        if compact == "賽事分析":
+            return [date_category_menu(TODAY)]
         if compact in ("台灣運彩賠率", "娛樂平台賠率"):
             return [odds_league_menu(compact)]
         match_odds = re.fullmatch(r"賠率(台灣運彩|娛樂平台)(英超|西甲|德甲|義甲|法甲|歐冠|NBA|NCAA|NBL|TPBL|MLB|NPB|KBO|CPBL|MiLB)", compact)
@@ -1581,67 +1583,12 @@ class Controller:
                     history, players, recommended, metrics = await self.team_details(
                         base_sport, a, b, league, as_of=requested_date,
                         fixture=matched_game)
-                # Only quote sportsbook odds for an identified future/live fixture.
-                actual_market = None
-                if not demo and league and kickoff and kickoff >= datetime.now(TZ):
-                    configured_sources = [
-                        source for source, name in (("tw","JBOT_API_TOKEN"),("platform","THE_ODDS_API_KEY"))
-                        if os.getenv(name,"").strip()]
-                    if configured_sources:
-                        quotes = await asyncio.gather(
-                            *(self.odds.match(source,league,a,b,kickoff,self.ui.team_zh)
-                              for source in configured_sources), return_exceptions=True)
-                        candidates = [q for q in quotes if isinstance(q,dict)]
-                        # Prefer the provider that actually has h2h, totals AND handicap.
-                        # Never fill missing markets using an unrelated bookmaker's line.
-                        if candidates:
-                            actual_market = max(candidates,key=lambda q: (
-                                sum(q.get(field) is not None for field in
-                                    ("home_price","away_price","total","spread")),
-                                q.get("source","").startswith("台灣運彩")))
+                # This is an analysis-only view: no sportsbook API request, prices,
+                # bookmakers or live odds. Both authorized feeds belong exclusively
+                # to the separate "檢視賠率" menu.
                 card = self.ui.offline_analysis(base_sport, a + " vs " + b, history, players,
                                                 league=league, recommended_team=recommended,
                                                 recent_metrics=metrics)
-                if isinstance(card,dict):
-                    panel = card["contents"]["body"]["contents"][-1]
-                    cells = panel.get("contents",[])
-                    if actual_market:
-                        source_title=actual_market["source"]+"｜"+actual_market["book"]
-                        cells[0]["text"]="✦ 真實盤口｜"+source_title
-                        # Keep recommendation; display sportsbook odds separately.
-                        if actual_market.get("home_price") is not None and actual_market.get("away_price") is not None:
-                            odds_text = ("💹 獨贏賠率  主 " + f"{actual_market['home_price']:.2f}" +
-                                         "／客 " + f"{actual_market['away_price']:.2f}" +
-                                         (("／和 " + f"{actual_market['draw_price']:.2f}")
-                                          if actual_market.get("draw_price") is not None else ""))
-                        else:
-                            odds_text = "💹 獨贏賠率  此來源未提供"
-                        cells.insert(2, text(odds_text, "sm", "#CBD5E1"))
-                        if actual_market.get("total") is not None:
-                            line=actual_market["total"]
-                            projected=(metrics or {}).get("expected_total")
-                            direction=("偏大" if projected>line+0.2 else "偏小" if projected<line-0.2 else "接近盤口") if projected is not None else "模型資料不足"
-                            over=actual_market.get("over_price")
-                            under=actual_market.get("under_price")
-                            prices=(f" 大 {over:.2f}" if over is not None else "") + (f"／小 {under:.2f}" if under is not None else "")
-                            cells[4]["text"]=f"📊 大小盤 {line:g}{prices}｜"+direction
-                        else:
-                            cells[4]["text"]="📊 大小盤  此來源未提供"
-                        if actual_market.get("spread") is not None:
-                            line=actual_market["spread"]
-                            projected=(metrics or {}).get("expected_margin")
-                            direction=("偏主隊" if projected+line>0.3 else "偏客隊" if projected+line< -0.3 else "接近盤口") if projected is not None else "模型資料不足"
-                            sh=actual_market.get("spread_home_price")
-                            sa=actual_market.get("spread_away_price")
-                            prices=(f" 主 {sh:.2f}" if sh is not None else "")+(f"／客 {sa:.2f}" if sa is not None else "")
-                            cells[6]["text"]=f"⚖️ 讓球 主隊 {line:+g}{prices}｜"+direction
-                        else:
-                            cells[6]["text"]="⚖️ 讓球  此來源未提供"
-                        cells.append(text("盤口更新："+str(actual_market.get("updated") or "未提供")[:19],"xs","#CBD5E1"))
-                    else:
-                        cells[0]["text"]="✦ 歷史模型參考"
-                        cells[3]["text"]="📊 大小分 "+((metrics or {}).get("total") or "資料不足")
-                        cells[5]["text"]="⚖️ 讓球 "+((metrics or {}).get("handicap") or "資料不足")
                 if isinstance(card, dict):
                     if league:
                         header_contents = card["contents"]["header"]["contents"]
