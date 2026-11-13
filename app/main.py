@@ -167,7 +167,7 @@ async def continuous_refresh(app):
                                 log.warning("soccer_analysis_payload_error league=%s details=%s",
                                             label, response.text[:800])
                         except Exception as exc:
-                            log.error("soccer_analysis_validation league=%s error=%s",
+                            log.exception("soccer_analysis_validation league=%s error=%s",
                                       label, type(exc).__name__)
             if not getattr(app.state, "verified_stats_probe_done", False):
                 app.state.verified_stats_probe_done = True

@@ -20,7 +20,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.6.61"
+VERSION = "0.6.62"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
