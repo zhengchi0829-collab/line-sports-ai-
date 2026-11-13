@@ -14,7 +14,7 @@ from .baseball_analysis import verified_baseball_analysis
 import logging
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import quote, urljoin
@@ -22,7 +22,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.6.75"
+VERSION = "0.6.76"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -253,7 +253,11 @@ class Fixtures:
                                 "basketball", "TPBL", dt, home, away, home_logo, away_logo,
                                 "TPBL 官方", "scheduled", True)
                     return [game], None
-                return parse_feed(kind, response.json()), None
+                parsed = parse_feed(kind, response.json())
+                if kind == "milb":
+                    level = name.removeprefix("milb_")
+                    parsed = [replace(game, source="MiLB:" + level) for game in parsed]
+                return parsed, None
         except httpx.HTTPStatusError as exc:
             status = exc.response.status_code
             if status in (401, 403, 429):
@@ -822,6 +826,7 @@ class Controller:
         if sport == "棒球":
             # League-specific score and roster lookup; do not use MLB results for CPBL.
             team_ids = None
+            milb_level = None
             if league == "MiLB":
                 # Fixture logos encode the official Stats API team IDs; they are more
                 # reliable than a generic team search when the next season is scheduled.
@@ -836,10 +841,15 @@ class Controller:
                             away_id = re.search(r"/(\d+)\.svg$", game.away_logo)
                             if home_id and away_id:
                                 team_ids = (home_id.group(1), away_id.group(1))
+                                if game.source.startswith("MiLB:"):
+                                    try:
+                                        milb_level = int(game.source.split(":", 1)[1])
+                                    except ValueError:
+                                        milb_level = None
                             break
             result = await verified_baseball_analysis(
                 self.fixtures.client, league or "MLB", a, b, self.ui.team_zh,
-                team_ids=team_ids)
+                team_ids=team_ids, sport_id=milb_level)
             if len(self.details) >= 128:
                 self.details.pop(next(iter(self.details)))
             self.details[key] = (time.monotonic(), result)
