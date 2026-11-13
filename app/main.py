@@ -293,7 +293,7 @@ async def process_event(event, app):
 
     fallback_text = "系統剛剛忙碌或資料來源暫時無法回應，請再點一次原本的按鈕。"
     try:
-        messages = await asyncio.wait_for(app.state.controller.reply(raw), timeout=9.0)
+        messages = await asyncio.wait_for(app.state.controller.reply(raw), timeout=18.0)
         if not isinstance(messages, list) or not messages:
             raise ValueError("empty_messages")
     except asyncio.CancelledError:
