@@ -136,10 +136,13 @@ async def verified_cpbl_analysis(client, home, away, translate=None):
         index=0 if (rates[0],net[0])>(rates[1],net[1]) else 1
         team=(home,away)[index]
         code=(h_code,a_code)[index]
-        wins,draws,losses=records[index]
         stamp=str(document.get("updated") or "未提供")
-        history=(f"{team}｜歷史最近五場：{wins}勝、{draws}和、{losses}敗"
-                 f"｜勝率 {wins*20:.1f}%｜資料截至 {stamp[:16]}")
+        def show_record(name, record):
+            wins, draws, losses = record
+            return f"{name}：近5場 {wins}勝{draws}和{losses}敗｜勝率 {wins*20:.0f}%"
+        history=(show_record(home,records[0])+"\n"+
+                 show_record(away,records[1])+"\n"+
+                 f"歷史戰績較佳：{team}｜資料截至 {stamp[:16]}")
         weights=[5,4,3,2,1]
         attack=[sum(w*g[2] for w,g in zip(weights,group))/15 for group in groups]
         defense=[sum(w*g[3] for w,g in zip(weights,group))/15 for group in groups]
