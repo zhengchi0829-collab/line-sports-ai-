@@ -484,8 +484,10 @@ class Fixtures:
 
 
 def select_games(games: list[Game], now: datetime, today: bool = False,
-                 future: bool = False) -> list[Game]:
-    if today:
+                 future: bool = False, on_date: date | None = None) -> list[Game]:
+    if on_date is not None:
+        valid = [g for g in games if g.start.date() == on_date]
+    elif today:
         # Today's calendar day in Asia/Taipei. No fallback to tomorrow.
         valid = [g for g in games if g.start.date() == now.date()]
     elif future:
@@ -510,7 +512,8 @@ def button(label: str, command: str, color="#0F766E") -> dict:
 def quick_menu() -> dict:
     labels = [
         ("⚽ 足球", "足球"), ("🏀 籃球", "籃球"), ("⚾ 棒球", "棒球"),
-        ("📅 今日賽事", TODAY), ("🗓️ 未來賽事", FUTURE), ("📊 檢視賠率", "檢視賠率"), ("🏠 主選單", MENU),
+        ("📅 今日賽事", TODAY), ("📆 指定日期", SPECIFIED),
+        ("🗓️ 未來賽事", FUTURE), ("📊 檢視賠率", "檢視賠率"), ("🏠 主選單", MENU),
     ]
     return {"items": [{"type": "action", "action": {"type": "message", "label": label, "text": cmd}}
                       for label, cmd in labels]}
@@ -524,11 +527,47 @@ CATEGORY_SOURCES = {
 }
 
 
-def date_category_menu(mode: str) -> dict:
-    title = "今日賽事" if mode == TODAY else "未來賽事"
-    desc = ("僅顯示台灣時間今日賽事" if mode == TODAY
-            else "僅顯示明天起的賽事，不包含今日")
-    return {"type": "flex", "altText": title + "｜請選擇運動種類",
+LEAGUE_CATEGORIES = {
+    "足球": tuple(SOCCER_LEAGUES),
+    "籃球": ("NBA", "NCAA", "NBL", "TPBL"),
+    "棒球": ("MLB", "NPB", "KBO", "CPBL", "MiLB"),
+}
+
+
+def calendar_action() -> dict:
+    now = datetime.now(TZ).date()
+    return {"type": "datetimepicker", "label": "📆 從日曆選日期",
+            "data": "cmd:" + SPECIFIED, "mode": "date",
+            "initial": now.isoformat(),
+            "min": (now - timedelta(days=365)).isoformat(),
+            "max": (now + timedelta(days=365)).isoformat()}
+
+
+def date_category_menu(mode: str, selected: date | None = None) -> dict:
+    if mode == SPECIFIED and selected is None:
+        title = "指定日期賽事"
+        desc = "選擇日期，再挑選球類與聯盟；只列出該日真實賽程"
+        actions = [
+            {"type": "button", "style": "primary", "color": "#7C3AED",
+             "height": "sm", "action": calendar_action()},
+            text("也可直接輸入：指定日期賽事2026-06-20", "xs", "#64748B"),
+            button("📅 回到今日賽事", TODAY, "#0F766E"),
+            button("🏠 回主選單", MENU, "#334155"),
+        ]
+    else:
+        title = (str(selected) + " 賽事") if mode == SPECIFIED else (
+            "今日賽事" if mode == TODAY else "未來賽事")
+        desc = ("只顯示台灣時間 " + str(selected) + " 的賽事" if selected else (
+            "僅顯示台灣時間今日賽事" if mode == TODAY else
+            "僅顯示明天起的賽事，不包含今日"))
+        prefix = (SPECIFIED + selected.isoformat()) if mode == SPECIFIED else mode
+        actions = [button("⚽ 足球", prefix + "足球", "#0F766E"),
+                   button("🏀 籃球", prefix + "籃球", "#C2410C"),
+                   button("⚾ 棒球", prefix + "棒球", "#7C3AED"),
+                   {"type": "button", "style": "secondary", "height": "sm",
+                    "action": calendar_action()},
+                   button("🏠 回主選單", MENU, "#334155")]
+    return {"type": "flex", "altText": title + "｜選擇賽事",
             "quickReply": quick_menu(),
             "contents": {"type": "bubble", "size": "kilo",
                 "header": {"type": "box", "layout": "vertical",
@@ -536,10 +575,25 @@ def date_category_menu(mode: str) -> dict:
                            "contents": [text("📅 " + title, "lg", "#FFFFFF", "bold"),
                                         text(desc, "sm", "#CBD5E1")]},
                 "body": {"type": "box", "layout": "vertical", "spacing": "md",
-                         "contents": [button("⚽ 足球", mode + "足球", "#0F766E"),
-                                      button("🏀 籃球", mode + "籃球", "#C2410C"),
-                                      button("⚾ 棒球", mode + "棒球", "#7C3AED"),
-                                      button("🏠 回主選單", MENU, "#334155")]}}}
+                         "contents": actions}}}
+
+
+def date_league_menu(mode: str, category: str, selected: date) -> dict:
+    prefix = SPECIFIED + selected.isoformat() if mode == SPECIFIED else TODAY
+    options = LEAGUE_CATEGORIES[category]
+    palette = "#7C3AED" if category == "棒球" else "#0F766E"
+    contents = [button("🔎 " + label, prefix + label, palette) for label in options]
+    contents.append(button("📆 更換日期", SPECIFIED, "#334155"))
+    return {"type": "flex",
+            "altText": f"{selected}｜{category}｜選擇聯盟",
+            "quickReply": quick_menu(),
+            "contents": {"type": "bubble", "size": "kilo",
+                "header": {"type": "box", "layout": "vertical",
+                           "backgroundColor": "#0F172A", "paddingAll": "16px",
+                           "contents": [text(f"{selected}｜{category}", "lg", "#FFFFFF", "bold"),
+                                        text("選擇聯盟後僅顯示指定日期的實際對戰", "sm", "#CBD5E1")]},
+                "body": {"type": "box", "layout": "vertical", "spacing": "sm",
+                         "contents": contents}}}
 
 
 def odds_category_menu() -> dict:
@@ -778,9 +832,10 @@ def nearby_html_image(html: str, team_name: str, base_url: str) -> str:
     return ""
 
 
-def fixture_cards(sport: str, snapshot: Snapshot, team_name, today=False, now=None) -> dict:
+def fixture_cards(sport: str, snapshot: Snapshot, team_name, today=False, now=None,
+                  on_date: date | None = None) -> dict:
     now = now or datetime.now(TZ)
-    games = select_games(snapshot.games, now, today)
+    games = select_games(snapshot.games, now, today, on_date=on_date)
     if not games:
         return notice(sport if sport.startswith("soccer_") else ("basketball" if sport.startswith("basketball_") else ("baseball" if sport.startswith("baseball_") else sport)), snapshot)
     colors = {"soccer": "#0F766E", "soccer_epl": "#0F766E", "soccer_laliga": "#B91C1C", "soccer_bundesliga": "#C2410C", "soccer_seriea": "#0369A1", "soccer_ligue1": "#7C3AED", "soccer_ucl": "#334155", "basketball": "#C2410C", "basketball_ncaa": "#B45309",
@@ -793,7 +848,9 @@ def fixture_cards(sport: str, snapshot: Snapshot, team_name, today=False, now=No
         home_logo = fallback_team_logo(sport, g.home, g.home_logo)
         away_logo = fallback_team_logo(sport, g.away, g.away_logo)
         label = g.start.strftime("%m/%d %H:%M") if g.time_known else g.start.strftime("%m/%d") + " \u6642\u9593\u5f85\u5b9a"
-        subtitle = "\u9032\u884c\u4e2d" if g.state == "live" else "\u5373\u5c07\u958b\u8cfd"
+        subtitle = ("已結束｜歷史賽事" if g.state == "final" else
+                    "進行中" if g.state == "live" else
+                    "即將開賽" if g.start >= now else "時間已過｜狀態未核實")
         if today and g.start.date() != now.date():
             subtitle = "\u4eca\u65e5\u7121\u5f85\u958b\u8cfd\uff5c\u4e0b\u4e00\u5834"
         def team_row(name, logo, role):
@@ -821,7 +878,11 @@ def fixture_cards(sport: str, snapshot: Snapshot, team_name, today=False, now=No
                      team_row(away, away_logo, "\u5ba2\u968a"), text(g.source + " | " + stamp +
                      (" | \u5feb\u53d6\u8cc7\u6599" if snapshot.stale else ""), "xxs", "#64748B")]},
             "footer": {"type": "box", "layout": "vertical", "paddingAll": "10px", "contents": [
-                button("\u7acb\u5373\u5206\u6790", (f"\u5206\u6790{basketball_league_label(sport)} {home} vs {away}" if sport.startswith("basketball") else (f"\u5206\u6790{baseball_league_label(sport)} {home} vs {away}" if sport.startswith("baseball") else f"\u5206\u6790{SOCCER_LEAGUE_LABELS.get(sport, SPORTS.get(sport, sport))} {home} vs {away}")), accent)]}})
+                button("立即分析", "分析" + (
+                    basketball_league_label(sport) if sport.startswith("basketball") else
+                    baseball_league_label(sport) if sport.startswith("baseball") else
+                    SOCCER_LEAGUE_LABELS.get(sport, SPORTS.get(sport, sport))) +
+                    f" {g.start:%Y-%m-%d} {home} vs {away}", accent)]}})
     return {"type": "flex", "altText": (basketball_league_label(sport) if sport.startswith("basketball") else (baseball_league_label(sport) if sport.startswith("baseball") else SOCCER_LEAGUE_LABELS.get(sport, SPORTS.get(sport, sport)))) + "\u8fd1\u671f\u8cfd\u4e8b\uff5c\u9ede\u9078\u5206\u6790",
             "quickReply": quick_menu(), "contents": {"type": "carousel", "contents": bubbles}}
 
