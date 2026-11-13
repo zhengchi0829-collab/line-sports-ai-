@@ -22,7 +22,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.6.66"
+VERSION = "0.6.67"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -318,9 +318,13 @@ class Fixtures:
                      {"sportId": 32, "startDate": (now - timedelta(days=1)).strftime("%Y-%m-%d"),
                       "endDate": (now + timedelta(days=180)).strftime("%Y-%m-%d")}, "kbo")]
         if sport == "baseball_milb":
-            return [("milb", "https://statsapi.mlb.com/api/v1/schedule",
-                     {"sportId": 21, "startDate": (now - timedelta(days=1)).strftime("%Y-%m-%d"),
-                      "endDate": (now + timedelta(days=180)).strftime("%Y-%m-%d")}, "milb")]
+            # MiLB requires level-specific schedules (AAA/AA/High-A/A/Rookie).
+            return [
+                (f"milb_{sid}", "https://statsapi.mlb.com/api/v1/schedule",
+                 {"sportId": sid, "startDate": (now - timedelta(days=1)).strftime("%Y-%m-%d"),
+                  "endDate": (now + timedelta(days=180)).strftime("%Y-%m-%d")}, "milb")
+                for sid in (11, 12, 13, 14, 16)
+            ]
         if sport == "baseball_cpbl":
             return [("cpbl", "https://raw.githubusercontent.com/pochih/cpbl2026/main/cpbl_data.json", {}, "cpbl")]
         return []
