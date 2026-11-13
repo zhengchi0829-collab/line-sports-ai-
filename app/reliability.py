@@ -22,7 +22,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.6.68"
+VERSION = "0.6.69"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -86,6 +86,10 @@ def parse_feed(kind: str, data: Any) -> list[Game]:
             if "scoreboard" not in data:
                 raise ValueError("NBA scoreboard missing")
             rows = data["scoreboard"].get("games", [])
+    elif kind in ("npb_archive", "kbo_archive"):
+        if not isinstance(data, list):
+            raise ValueError("Asian baseball archive must be a list")
+        rows = data
     elif kind in ("mlb", "npb", "kbo", "milb"):
         if not isinstance(data, dict) or "dates" not in data:
             raise ValueError("Baseball dates missing")
@@ -133,17 +137,19 @@ def parse_feed(kind: str, data: Any) -> list[Game]:
                 item = Game(str(g["gameId"]), "basketball", "NBA", instant(raw), nba_name(h),
                             nba_name(a), nba_logo(h), nba_logo(a), "NBA",
                             "live" if status == 2 else "scheduled", not bool(g.get("isTimeTBD")))
-            elif kind in ("mlb", "npb", "kbo", "milb"):
+            elif kind in ("mlb", "npb", "kbo", "milb", "npb_archive", "kbo_archive"):
                 status = g.get("status", {})
                 state = status.get("abstractGameState")
                 if state not in ("Preview", "Live") or any(w in status.get("detailedState", "").lower()
                                                            for w in ("cancel", "postpon")):
                     continue
                 h, a = g["teams"]["home"]["team"], g["teams"]["away"]["team"]
-                league_name = {"mlb": "MLB", "npb": "NPB", "kbo": "KBO", "milb": "MiLB"}[kind]
+                league_name = {"mlb": "MLB", "npb": "NPB", "kbo": "KBO", "milb": "MiLB",
+                               "npb_archive": "NPB", "kbo_archive": "KBO"}[kind]
                 item = Game(str(g["gamePk"]), "baseball", league_name, instant(g["gameDate"]), h["name"], a["name"],
-                            f"https://www.mlbstatic.com/team-logos/{h['id']}.svg",
-                            f"https://www.mlbstatic.com/team-logos/{a['id']}.svg", "MLB Stats API",
+                            ("" if kind.endswith("_archive") else f"https://www.mlbstatic.com/team-logos/{h['id']}.svg"),
+                            ("" if kind.endswith("_archive") else f"https://www.mlbstatic.com/team-logos/{a['id']}.svg"),
+                            ("Public league score archive" if kind.endswith("_archive") else "MLB Stats API"),
                             "live" if state == "Live" else "scheduled", not status.get("startTimeTBD", False))
             elif kind == "cpbl":
                 if str(g.get("status", "")).lower() in ("final", "postponed", "cancelled", "canceled"):
@@ -310,13 +316,13 @@ class Fixtures:
                      {"sportId": 1, "startDate": (now - timedelta(days=1)).strftime("%Y-%m-%d"),
                       "endDate": (now + timedelta(days=240)).strftime("%Y-%m-%d")}, "mlb")]
         if sport == "baseball_npb":
-            return [("npb", "https://statsapi.mlb.com/api/v1/schedule",
-                     {"sportId": 31, "startDate": (now - timedelta(days=1)).strftime("%Y-%m-%d"),
-                      "endDate": (now + timedelta(days=180)).strftime("%Y-%m-%d")}, "npb")]
+            return [("npb_archive",
+                     f"https://raw.githubusercontent.com/dentearl/npb-data/main/data/npb/{now.year}.json",
+                     {}, "npb_archive")]
         if sport == "baseball_kbo":
-            return [("kbo", "https://statsapi.mlb.com/api/v1/schedule",
-                     {"sportId": 32, "startDate": (now - timedelta(days=1)).strftime("%Y-%m-%d"),
-                      "endDate": (now + timedelta(days=180)).strftime("%Y-%m-%d")}, "kbo")]
+            return [("kbo_archive",
+                     f"https://raw.githubusercontent.com/dentearl/kbo-data/main/data/kbo/{now.year}.json",
+                     {}, "kbo_archive")]
         if sport == "baseball_milb":
             # MiLB requires level-specific schedules (AAA/AA/High-A/A/Rookie).
             return [
