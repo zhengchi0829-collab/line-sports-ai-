@@ -11,6 +11,7 @@ from .odds import OddsGateway, format_book
 import hashlib
 import math
 from .baseball_analysis import verified_baseball_analysis
+from .legacy import team_display
 import logging
 import re
 import time
@@ -839,7 +840,7 @@ def fixture_cards(sport: str, snapshot: Snapshot, team_name, today=False, now=No
     accent = colors[sport]
     bubbles = []
     for g in games:
-        home, away = team_name(g.home), team_name(g.away)
+        home, away = team_display(g.home), team_display(g.away)
         home_logo = fallback_team_logo(sport, g.home, g.home_logo)
         away_logo = fallback_team_logo(sport, g.away, g.away_logo)
         label = g.start.strftime("%m/%d %H:%M") if g.time_known else g.start.strftime("%m/%d") + " \u6642\u9593\u5f85\u5b9a"
@@ -877,7 +878,7 @@ def fixture_cards(sport: str, snapshot: Snapshot, team_name, today=False, now=No
                     basketball_league_label(sport) if sport.startswith("basketball") else
                     baseball_league_label(sport) if sport.startswith("baseball") else
                     SOCCER_LEAGUE_LABELS.get(sport, SPORTS.get(sport, sport))) +
-                    f" {g.start:%Y-%m-%d} {home} vs {away}", accent)]}})
+                    f" {g.start:%Y-%m-%d} {g.home} vs {g.away}", accent)]}})
     return {"type": "flex", "altText": (basketball_league_label(sport) if sport.startswith("basketball") else (baseball_league_label(sport) if sport.startswith("baseball") else SOCCER_LEAGUE_LABELS.get(sport, SPORTS.get(sport, sport)))) + "\u8fd1\u671f\u8cfd\u4e8b\uff5c\u9ede\u9078\u5206\u6790",
             "quickReply": quick_menu(), "contents": {"type": "carousel", "contents": bubbles}}
 
