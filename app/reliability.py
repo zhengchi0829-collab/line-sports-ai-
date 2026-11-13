@@ -158,15 +158,19 @@ def parse_feed(kind: str, data: Any, include_final: bool = False) -> list[Game]:
                 raw = g.get("matchDateTimeUTC")
                 dt = instant(raw) if raw else instant(g["matchDateTime"], ZoneInfo("Europe/Berlin"))
                 h, a = g["team1"], g["team2"]
+                outcomes = g.get("matchResults") or []
+                full_time = next(
+                    (result for result in outcomes
+                     if result.get("resultTypeID") == 2), None)
+                if full_time is None and g.get("matchIsFinished") and outcomes:
+                    full_time = outcomes[-1]
                 item = Game(str(g["matchID"]), "soccer", "\u5fb7\u7532", dt,
                             h["teamName"], a["teamName"], h.get("teamIconUrl", ""),
                             a.get("teamIconUrl", ""), "OpenLigaDB",
                             "final" if g.get("matchIsFinished") else "scheduled",
                             True,
-                            final_score((g.get("matchResults") or [{}])[-1].get("pointsTeam1"))
-                            if g.get("matchIsFinished") and g.get("matchResults") else None,
-                            final_score((g.get("matchResults") or [{}])[-1].get("pointsTeam2"))
-                            if g.get("matchIsFinished") and g.get("matchResults") else None)
+                            final_score(full_time.get("pointsTeam1")) if full_time else None,
+                            final_score(full_time.get("pointsTeam2")) if full_time else None)
             elif kind.startswith("nba"):
                 status = int(g.get("gameStatus", 1))
                 if status not in ((1, 2, 3) if include_final else (1, 2)):
