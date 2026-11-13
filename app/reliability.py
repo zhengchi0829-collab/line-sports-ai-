@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.6.56"
+VERSION = "0.6.57"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -959,7 +959,7 @@ class Controller:
             self.jobs[key] = job
             job.add_done_callback(lambda done: self.jobs.pop(key, None) if self.jobs.get(key) is done else None)
         try:
-            result = await asyncio.wait_for(asyncio.shield(job), 3.3)
+            result = await asyncio.wait_for(asyncio.shield(job), 6.0)
         except TimeoutError:
             return cached[1] if cached else fallback
         if len(self.details) >= 128:
