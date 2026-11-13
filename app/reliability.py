@@ -23,7 +23,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.7.2"
+VERSION = "0.7.3"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -904,6 +904,18 @@ def fixture_cards(sport: str, snapshot: Snapshot, team_name, today=False, now=No
         if g.state == "final":
             bubbles.append(score_only_card(g, team_name)["contents"])
             continue
+        if g.start < now and g.state != "live":
+            # Do not offer pregame recommendations for a past, unverified result.
+            when = g.start.strftime("%Y/%m/%d %H:%M")
+            bubbles.append({"type": "bubble", "size": "kilo",
+                "header": {"type": "box", "layout": "vertical", "paddingAll": "14px",
+                           "backgroundColor": "#071A2D",
+                           "contents": [text(when, "sm", "#8EF8FF", "bold"),
+                                        text(f"{team_name(g.home)} VS {team_name(g.away)}",
+                                             "md", "#FFFFFF", "bold")]},
+                "body": {"type": "box", "layout": "vertical", "paddingAll": "15px",
+                         "contents": [text("尚未取得正式賽果", "sm", "#CBD5E1")]}})
+            continue
         home, away = team_display(g.home), team_display(g.away)
         home_logo = fallback_team_logo(sport, g.home, g.home_logo)
         away_logo = fallback_team_logo(sport, g.away, g.away_logo)
@@ -1546,6 +1558,11 @@ class Controller:
                              "quickReply": quick_menu()}]
                 if matched_game is not None and matched_game.state == "final":
                     return [score_only_card(matched_game, self.ui.team_zh)]
+                if (matched_game is not None and matched_game.start < datetime.now(TZ)
+                        and matched_game.state != "live"):
+                    return [{"type": "text",
+                             "text": "此場比賽尚未取得已核實的最終比分，暫不進行其他分析。",
+                             "quickReply": quick_menu()}]
                 retrospective_other_sport = bool(
                     requested_date and base_sport != "棒球" and
                     (requested_date < datetime.now(TZ).date()
