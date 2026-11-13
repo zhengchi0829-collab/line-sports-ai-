@@ -392,12 +392,26 @@ def offline_analysis(sport, matchup=None, team_history=None, star_players=None, 
                 "cornerRadius": "12px", "paddingAll": "11px", "spacing": "xs",
                 "contents": [txt(heading, "sm", accent, "bold"), txt(content)]}
     analysis_label = (league or "NBA") if sport == "籃球" else ((league or "棒球") if sport == "棒球" else ((league or "足球") if sport == "足球" else sport))
-    return {"type": "flex", "altText": f"{analysis_label}對戰分析｜{home} VS {away}",
+    # Translate the presentation only; original team strings remain the model keys.
+    home_display, away_display = team_display(home), team_display(away)
+    def bilingual_text(value):
+        value = str(value)
+        for original in sorted((home, away), key=len, reverse=True):
+            translated = team_display(original)
+            if original != translated:
+                value = value.replace(original, translated)
+        return value
+    focus = bilingual_text(focus)
+    result = bilingual_text(result)
+    total = bilingual_text(total)
+    handicap = bilingual_text(handicap)
+    winner_display = team_display(winner) if winner else None
+    return {"type": "flex", "altText": f"{analysis_label}對戰分析｜{home_display} VS {away_display}"[:400],
             "contents": {"type": "bubble", "size": "kilo",
                 "header": {"type": "box", "layout": "vertical", "backgroundColor": "#0F172A",
                     "paddingAll": "14px", "spacing": "xs", "contents": [
                         txt(f"{icons[sport]}  MATCH ANALYSIS", "xs", "#93C5FD", "bold"),
-                        txt(f"{home}  VS  {away}", "md", "#FFFFFF", "bold"),
+                        txt(f"{home_display}  VS  {away_display}", "md", "#FFFFFF", "bold"),
                         txt(f"{analysis_label} · 對戰情境分析", "xs", "#CBD5E1")]},
                 "body": {"type": "box", "layout": "vertical", "backgroundColor": "#FFFFFF",
                     "paddingAll": "12px", "spacing": "sm", "contents": [
@@ -407,7 +421,7 @@ def offline_analysis(sport, matchup=None, team_history=None, star_players=None, 
                          "cornerRadius": "12px", "paddingAll": "13px", "spacing": "sm",
                          "contents": [
                              txt("✦ 歷史五場模型分析（非盤口）", "md", "#FDE68A", "bold"),
-                             txt(f"🏆 獨贏  {winner or '資料不足，暫無推薦'}", "md", "#FFFFFF", "bold"),
+                             txt(f"🏆 獨贏  {winner_display or '資料不足，暫無推薦'}", "md", "#FFFFFF", "bold"),
                              {"type": "separator", "color": "#475569"},
                              txt(f"📊 大小分  {total}", "md", "#FFFFFF", "bold"),
                              {"type": "separator", "color": "#475569"},
