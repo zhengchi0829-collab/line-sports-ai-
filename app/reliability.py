@@ -20,7 +20,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.6.60"
+VERSION = "0.6.61"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -925,7 +925,8 @@ class Controller:
                         handicap_text = f"{favored} -{handicap_line:g} {unit}（模型參考）"
                     else:
                         handicap_text = f"讓分差距不足｜參考 {favored} -{handicap_line:g} {unit}"
-                    metrics = {"total": total_text, "handicap": handicap_text}
+                    metrics = {"total": total_text, "handicap": handicap_text,
+                               "expected_total": expected_total, "expected_margin": expected_margin}
                 selected_id = ids[0 if chosen == a else 1]
                 roster_response, leaders_response = await asyncio.gather(
                     self.fixtures.client.get(base + "/teams/" + selected_id + "/roster"),
@@ -1052,17 +1053,27 @@ class Controller:
                     if snapshot:
                         for game in snapshot.games:
                             def comparable(given, actual):
-                                return re.sub(r"[^\\w]","",str(given)).casefold() == re.sub(r"[^\\w]","",str(actual)).casefold()
+                                return re.sub(r"[^\w]","",str(given)).casefold() == re.sub(r"[^\w]","",str(actual)).casefold()
                             if ((comparable(game.home,a) or comparable(self.ui.team_zh(game.home),a))
                                 and (comparable(game.away,b) or comparable(self.ui.team_zh(game.away),b))):
                                 kickoff = game.start
                                 break
                 if not demo and league and kickoff:
-                    for source in ("tw","platform"):
-                        quote = await self.odds.match(source,league,a,b,kickoff,self.ui.team_zh)
-                        if quote:
-                            actual_market = quote
-                            break
+                    configured_sources = [
+                        source for source, name in (("tw","JBOT_API_TOKEN"),("platform","THE_ODDS_API_KEY"))
+                        if os.getenv(name,"").strip()]
+                    if configured_sources:
+                        quotes = await asyncio.gather(
+                            *(self.odds.match(source,league,a,b,kickoff,self.ui.team_zh)
+                              for source in configured_sources), return_exceptions=True)
+                        candidates = [q for q in quotes if isinstance(q,dict)]
+                        # Prefer the provider that actually has h2h, totals AND handicap.
+                        # Never fill missing markets using an unrelated bookmaker's line.
+                        if candidates:
+                            actual_market = max(candidates,key=lambda q: (
+                                sum(q.get(field) is not None for field in
+                                    ("home_price","away_price","total","spread")),
+                                q.get("source","").startswith("台灣運彩")))
                 card = self.ui.offline_analysis(base_sport, a + " vs " + b, history, players,
                                                 league=league, recommended_team=recommended,
                                                 recent_metrics=metrics)
@@ -1076,18 +1087,26 @@ class Controller:
                             cells[1]["text"]=("🏆 獨贏賠率  主 "+f"{actual_market['home_price']:.2f}"+
                                               "／客 "+f"{actual_market['away_price']:.2f}"+
                                               (("／和 "+f"{actual_market['draw_price']:.2f}") if actual_market.get("draw_price") else ""))
+                        else:
+                            cells[1]["text"]="🏆 獨贏賠率  此來源未提供"
                         if actual_market.get("total") is not None:
                             line=actual_market["total"]
                             projected=(metrics or {}).get("expected_total")
                             direction=("偏大" if projected>line+0.2 else "偏小" if projected<line-0.2 else "接近盤口") if projected is not None else "模型資料不足"
-                            cells[3]["text"]=f"📊 大小盤 {line:g}｜"+direction
+                            over=actual_market.get("over_price")
+                            under=actual_market.get("under_price")
+                            prices=(f" 大 {over:.2f}" if over is not None else "") + (f"／小 {under:.2f}" if under is not None else "")
+                            cells[3]["text"]=f"📊 大小盤 {line:g}{prices}｜"+direction
                         else:
                             cells[3]["text"]="📊 大小盤  此來源未提供"
                         if actual_market.get("spread") is not None:
                             line=actual_market["spread"]
                             projected=(metrics or {}).get("expected_margin")
                             direction=("偏主隊" if projected+line>0.3 else "偏客隊" if projected+line< -0.3 else "接近盤口") if projected is not None else "模型資料不足"
-                            cells[5]["text"]=f"⚖️ 讓球 主隊 {line:+g}｜"+direction
+                            sh=actual_market.get("spread_home_price")
+                            sa=actual_market.get("spread_away_price")
+                            prices=(f" 主 {sh:.2f}" if sh is not None else "")+(f"／客 {sa:.2f}" if sa is not None else "")
+                            cells[5]["text"]=f"⚖️ 讓球 主隊 {line:+g}{prices}｜"+direction
                         else:
                             cells[5]["text"]="⚖️ 讓球  此來源未提供"
                         cells.append(text("盤口更新："+str(actual_market.get("updated") or "未提供")[:19],"xs","#CBD5E1"))
