@@ -286,7 +286,7 @@ async def verified_asian_baseball_analysis(client, league, home, away, translate
         return UNAVAILABLE
 
 
-async def verified_baseball_analysis(client, league, home, away, translate=None):
+async def verified_baseball_analysis(client, league, home, away, translate=None, team_ids=None):
     """Return (form, roster, winner, metrics) with no fake observed statistics."""
     if league == "CPBL":
         return await verified_cpbl_analysis(client,home,away,translate)
@@ -297,30 +297,38 @@ async def verified_baseball_analysis(client, league, home, away, translate=None)
         return UNAVAILABLE
     base = "https://statsapi.mlb.com/api/v1"
     try:
+        # When a user selects an official MiLB fixture, use its exact team IDs.
+        # MiLB roster/team searches can omit upcoming-season teams.
+        direct_ids = (list(team_ids) if team_ids and len(team_ids) == 2
+                      and all(str(x).isdigit() for x in team_ids) else None)
         # MiLB covers five levels; avoid treating aggregate sportId 21 as a team league.
         async def load_teams(sid):
             response = await client.get(base + "/teams",
                                         params={"sportId": sid}, timeout=3)
             response.raise_for_status()
             return [(team, sid) for team in response.json().get("teams", [])]
-        team_responses = await asyncio.gather(
-            *(load_teams(sid) for sid in sport_ids), return_exceptions=True)
-        teams = [entry for response in team_responses if isinstance(response, list)
-                 for entry in response]
-        if not teams:
-            return UNAVAILABLE
         matches = []
-        for wanted in (home, away):
-            def match_score(team):
-                aliases = [team.get(k,"") for k in
-                           ("name", "teamName", "clubName", "abbreviation", "shortName")]
-                aliases.append((team.get("locationName") or "") + " " + (team.get("teamName") or ""))
-                return max((similarity(v, wanted, translate) for v in aliases), default=0.0)
-            chosen, selected_sid = max(teams, key=lambda entry: match_score(entry[0]))
-            if match_score(chosen) < 0.74 or not chosen.get("id"):
-                logger.info("baseball_form_unknown_team league=%s",league)
+        if direct_ids:
+            matches = [({"id": int(tid)}, None) for tid in direct_ids]
+        else:
+            team_responses = await asyncio.gather(
+                *(load_teams(sid) for sid in sport_ids), return_exceptions=True)
+            teams = [entry for response in team_responses if isinstance(response, list)
+                     for entry in response]
+            if not teams:
                 return UNAVAILABLE
-            matches.append((chosen, selected_sid))
+            for wanted in (home, away):
+                def match_score(team):
+                    aliases = [team.get(k,"") for k in
+                               ("name", "teamName", "clubName", "abbreviation", "shortName")]
+                    aliases.append((team.get("locationName") or "") + " " + (team.get("teamName") or ""))
+                    return max((similarity(v, wanted, translate) for v in aliases), default=0.0)
+                chosen, selected_sid = max(teams, key=lambda entry: match_score(entry[0]))
+                if match_score(chosen) < 0.74 or not chosen.get("id"):
+                    logger.info("baseball_form_unknown_team league=%s name=%s best=%s",
+                                league, wanted, chosen.get("name"))
+                    return UNAVAILABLE
+                matches.append((chosen, selected_sid))
         if matches[0][0]["id"] == matches[1][0]["id"]:
             return UNAVAILABLE
         now=datetime.now(timezone.utc)
@@ -328,9 +336,10 @@ async def verified_baseball_analysis(client, league, home, away, translate=None)
         end=now.date().isoformat()
         async def schedule(entry):
             team, sid = entry
-            resp=await client.get(base + "/schedule",params={
-                "sportId":sid,"teamId":team["id"],"startDate":start,"endDate":end},
-                timeout=4)
+            params = {"teamId": team["id"], "startDate": start, "endDate": end}
+            if sid is not None:
+                params["sportId"] = sid
+            resp=await client.get(base + "/schedule",params=params,timeout=4)
             resp.raise_for_status()
             return finished_matches(resp.json(), team["id"])
         games = await asyncio.gather(*(schedule(t) for t in matches),return_exceptions=True)
