@@ -110,6 +110,55 @@ async def startup_probe(app):
         log.error("startup_probe failed=%s", type(exc).__name__)
 
 
+async def dated_flow_probe(app):
+    """Smoke-test the complete dated fixture -> LINE button -> model flow (no user messages)."""
+    await asyncio.sleep(15)
+    ctl = app.state.controller
+    # June is within the 2026 NPB/KBO/MLB regular seasons.
+    selected = datetime(2026, 6, 20, tzinfo=TZ).date()
+    for league, key in (("MLB", "baseball"), ("NPB", "baseball_npb"),
+                        ("KBO", "baseball_kbo")):
+        try:
+            snap = await asyncio.wait_for(ctl.fixtures.on_date(key, selected), timeout=12)
+            if not snap.games:
+                log.warning("dated_analysis_probe league=%s date=%s status=no_games errors=%s",
+                            league, selected, snap.errors[:3])
+                app.state.date_probe_status[league] = "no_games"
+                continue
+            game = snap.games[0]
+            card = fixture_cards(key, Snapshot([game], snap.fetched, snap.errors,
+                                                snap.successes, snap.stale),
+                                 ui.team_zh, on_date=selected)
+            command = card["contents"]["contents"][0]["footer"]["contents"][0]["action"]["text"]
+            if selected.isoformat() not in command:
+                raise AssertionError("analysis button lost its fixture date")
+            analysis = await asyncio.wait_for(ctl.reply(command), timeout=16)
+            ok = bool(analysis and analysis[0].get("type") == "flex"
+                      and selected.strftime("%Y/%m/%d")
+                      in str(analysis[0].get("contents", {}).get("header", {})))
+            if not ok:
+                raise AssertionError("dated analysis did not return correct fixture card")
+            token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "").strip()
+            if token:
+                response = await app.state.line_client.post(
+                    "https://api.line.me/v2/bot/message/validate/reply",
+                    headers={"Authorization": "Bearer " + token},
+                    json={"messages": [card, *analysis[:1]]})
+                if response.status_code != 200:
+                    log.warning("dated_analysis_line_validation league=%s status=%s detail=%s",
+                                league, response.status_code, response.text[:350])
+                    raise AssertionError("LINE rejected dated fixture / analysis card")
+            app.state.date_probe_status[league] = "passed"
+            log.info("dated_analysis_probe league=%s date=%s status=passed games=%s",
+                     league, selected, len(snap.games))
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            app.state.date_probe_status[league] = "failed:" + type(exc).__name__
+            log.warning("dated_analysis_probe league=%s date=%s status=failed kind=%s",
+                        league, selected, type(exc).__name__)
+
+
 REFRESH_KEYS = (
     "soccer",
     "soccer_epl",
@@ -242,6 +291,7 @@ async def lifespan(app):
     app.state.last_background_refresh = None
     app.state.background_refresh_counts = {}
     app.state.soccer_validation_done = False
+    app.state.date_probe_status = {}
     async with httpx.AsyncClient(timeout=httpx.Timeout(3.5, connect=2), follow_redirects=True,
                                  limits=httpx.Limits(max_connections=12)) as source_client, \
                httpx.AsyncClient(timeout=httpx.Timeout(5, connect=2)) as line_client:
@@ -249,15 +299,18 @@ async def lifespan(app):
         app.state.line_client = line_client
         probe = asyncio.create_task(startup_probe(app))
         refresher = asyncio.create_task(continuous_refresh(app))
+        dated_probe = asyncio.create_task(dated_flow_probe(app))
         yield
         probe.cancel()
         refresher.cancel()
+        dated_probe.cancel()
         active = list(app.state.pending)
         if active:
             done, unfinished = await asyncio.wait(active, timeout=4)
             for task in unfinished:
                 task.cancel()
-        await asyncio.gather(probe, refresher, *active, return_exceptions=True)
+        await asyncio.gather(probe, refresher, dated_probe,
+                             *active, return_exceptions=True)
         await app.state.controller.close()
     # Keep the existing LINE default rich menu. Recreating it on every deploy
     # needlessly downloads a large font and risks switching to an unfinished menu.
@@ -286,7 +339,8 @@ async def feature_health():
                 "last_run_epoch": app.state.last_background_refresh,
                 "counts": app.state.background_refresh_counts,
             },
-            "pending_events": len(app.state.pending)}
+            "pending_events": len(app.state.pending),
+            "dated_analysis_probe": app.state.date_probe_status}
 
 
 async def _push_fallback(event, app, token: str, text_value: str) -> bool:
