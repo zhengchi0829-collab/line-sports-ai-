@@ -64,22 +64,74 @@ async def startup_probe(app):
         log.error("startup_probe failed=%s", type(exc).__name__)
 
 
+REFRESH_KEYS = (
+    "soccer",
+    "basketball",
+    "basketball_ncaa",
+    "basketball_nbl",
+    "basketball_tpbl",
+    "baseball",
+    "baseball_npb",
+    "baseball_kbo",
+    "baseball_cpbl",
+    "baseball_milb",
+)
+
+
+async def continuous_refresh(app):
+    """Keep fixture caches warm while the service is running."""
+    # Give startup validation a short head start, then continuously refresh every 5 minutes.
+    await asyncio.sleep(10)
+    while True:
+        started = time.monotonic()
+        try:
+            results = await asyncio.gather(
+                *(app.state.controller.fixtures.refresh(key) for key in REFRESH_KEYS),
+                return_exceptions=True,
+            )
+            counts = {}
+            failures = 0
+            for key, result in zip(REFRESH_KEYS, results):
+                if isinstance(result, Snapshot):
+                    counts[key] = len(result.games)
+                    failures += len(result.errors)
+                else:
+                    counts[key] = -1
+                    failures += 1
+            app.state.last_background_refresh = time.time()
+            app.state.background_refresh_counts = counts
+            log.info(
+                "background_refresh version=%s keys=%s failures=%s elapsed_ms=%d",
+                VERSION, len(REFRESH_KEYS), failures,
+                int((time.monotonic() - started) * 1000),
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log.error("background_refresh_error kind=%s", type(exc).__name__)
+        await asyncio.sleep(300)
+
+
 @asynccontextmanager
 async def lifespan(app):
     app.state.pending = set()
     app.state.events = {}
     app.state.line_validation = None
+    app.state.last_background_refresh = None
+    app.state.background_refresh_counts = {}
     async with httpx.AsyncClient(timeout=httpx.Timeout(3.5, connect=2), follow_redirects=True,
                                  limits=httpx.Limits(max_connections=12)) as source_client, \
                httpx.AsyncClient(timeout=httpx.Timeout(5, connect=2)) as line_client:
         app.state.controller = Controller(ui, source_client)
         app.state.line_client = line_client
         probe = asyncio.create_task(startup_probe(app))
+        refresher = asyncio.create_task(continuous_refresh(app))
         yield
         probe.cancel()
+        refresher.cancel()
         for task in list(app.state.pending):
             task.cancel()
-        await asyncio.gather(probe, *app.state.pending, return_exceptions=True)
+        await asyncio.gather(probe, refresher, *app.state.pending, return_exceptions=True)
         await app.state.controller.close()
     # Keep the existing LINE default rich menu. Recreating it on every deploy
     # needlessly downloads a large font and risks switching to an unfinished menu.
@@ -102,6 +154,12 @@ async def feature_health():
             "providers": {sport: {"cached_games": len(item[1].games),
                          "updated": item[1].fetched.isoformat() if item[1].fetched else None}
                           for sport, item in ctl.fixtures.cache.items()},
+            "background_refresh": {
+                "active": True,
+                "interval_seconds": 300,
+                "last_run_epoch": app.state.last_background_refresh,
+                "counts": app.state.background_refresh_counts,
+            },
             "pending_events": len(app.state.pending)}
 
 
