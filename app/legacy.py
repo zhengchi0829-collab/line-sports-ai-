@@ -7,6 +7,8 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import httpx
+
+from .team_names import chinese_name, bilingual_name
 from fastapi import FastAPI, Header, HTTPException, Request
 
 app = FastAPI(title="體育AI分析系統", version="0.6.66")
@@ -480,7 +482,13 @@ TEAM_ZH = {
 }
 
 def team_zh(name):
-    return TEAM_ZH.get(name, name)
+    """Chinese identity used for matching verified fixture teams."""
+    return chinese_name(name, TEAM_ZH)
+
+
+def team_display(name):
+    """Show a recognizable bilingual team title without changing provider IDs."""
+    return bilingual_name(name, TEAM_ZH)
 
 async def upcoming_match_cards(sport):
     """Return a tappable LINE carousel with real dated fixtures."""
