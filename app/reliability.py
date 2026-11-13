@@ -975,9 +975,10 @@ class Controller:
         self.details: dict[tuple, tuple] = {}
         self.jobs: dict[tuple, asyncio.Task] = {}
 
-    async def team_details(self, sport, a, b, league=None):
+    async def team_details(self, sport, a, b, league=None,
+                           as_of: date | None = None, fixture: Game | None = None):
         """Verified recent form and registered players from the selected competition."""
-        key = (sport, league, a, b)
+        key = (sport, league, a, b, as_of)
         cached = self.details.get(key)
         if cached and time.monotonic() - cached[0] < 1200:
             return cached[1]
@@ -988,7 +989,8 @@ class Controller:
             if league == "MiLB":
                 # Fixture logos encode the official Stats API team IDs; they are more
                 # reliable than a generic team search when the next season is scheduled.
-                snapshot = self.fixtures.last.get("baseball_milb")
+                snapshot = (Snapshot([fixture]) if fixture else
+                            self.fixtures.last.get("baseball_milb"))
                 def norm_team(value):
                     return re.sub(r"[^\w]", "", str(value)).casefold()
                 if snapshot:
@@ -1007,7 +1009,7 @@ class Controller:
                             break
             result = await verified_baseball_analysis(
                 self.fixtures.client, league or "MLB", a, b, self.ui.team_zh,
-                team_ids=team_ids, sport_id=milb_level)
+                team_ids=team_ids, sport_id=milb_level, as_of=as_of)
             if len(self.details) >= 128:
                 self.details.pop(next(iter(self.details)))
             self.details[key] = (time.monotonic(), result)
@@ -1242,7 +1244,7 @@ class Controller:
         if compact in (TODAY, FUTURE, SPECIFIED):
             return [date_category_menu(compact)]
         specific = re.fullmatch(
-            rf"{re.escape(SPECIFIED)}(\\d{{4}}-\\d{{2}}-\\d{{2}})(.*)", compact)
+            rf"{re.escape(SPECIFIED)}(\d{{4}}-\d{{2}}-\d{{2}})(.*)", compact)
         if specific:
             date_text, suffix = specific.groups()
             try:
