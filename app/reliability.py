@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.6.51"
+VERSION = "0.6.52"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -844,10 +844,24 @@ class Controller:
                 if not chosen:
                     return (history, "雙方近況無足夠差異或樣本不足，暫無可靠推薦主力名單。", None)
                 selected_id = ids[0 if chosen == a else 1]
-                roster_response = await self.fixtures.client.get(
-                    base + "/teams/" + selected_id + "/roster")
+                roster_response, leaders_response = await asyncio.gather(
+                    self.fixtures.client.get(base + "/teams/" + selected_id + "/roster"),
+                    self.fixtures.client.get(base + "/teams/" + selected_id + "/leaders"),
+                    return_exceptions=True)
+                leaders = []
+                if isinstance(leaders_response, httpx.Response) and leaders_response.status_code == 200:
+                    for category in leaders_response.json().get("leaders", []):
+                        if not isinstance(category, dict):
+                            continue
+                        for entry in category.get("leaders", [])[:2]:
+                            if not isinstance(entry, dict):
+                                continue
+                            athlete = entry.get("athlete") or {}
+                            name = athlete.get("displayName") or athlete.get("fullName")
+                            if name and name not in leaders:
+                                leaders.append(name)
                 names = []
-                if roster_response.status_code == 200:
+                if isinstance(roster_response, httpx.Response) and roster_response.status_code == 200:
                     athletes = roster_response.json().get("athletes", [])
                     if isinstance(athletes, dict):
                         athletes = list(athletes.values())
@@ -864,9 +878,12 @@ class Controller:
                             name = athlete.get("displayName") or athlete.get("fullName")
                             if name and name not in names:
                                 names.append(name)
-                player_text = (f"{chosen}｜ESPN 現役登錄球員（不代表已確認先發）："
-                               + "、".join(names[:5])) if names else (
-                               f"{chosen}｜尚無可驗證的球員名單；不可推定主力或先發。")
+                # Prefer actual statistical leaders to arbitrary roster ordering.
+                player_text = (f"{chosen}｜ESPN 球隊數據領先球員（非確定先發）："
+                               + "、".join(leaders[:5])) if leaders else (
+                               (f"{chosen}｜ESPN 現役登錄球員（尚未核實主力／先發）："
+                                + "、".join(names[:5])) if names else
+                               f"{chosen}｜尚無可驗證的主力球員名單。")
                 return (history, player_text, chosen)
             except (httpx.HTTPError, ValueError, TypeError, KeyError, IndexError) as exc:
                 log.warning("verified_team_stats_failed league=%s reason=%s", league, type(exc).__name__)
