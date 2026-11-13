@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 
-app = FastAPI(title="體育AI分析系統", version="0.6.53")
+app = FastAPI(title="體育AI分析系統", version="0.6.54")
 log = logging.getLogger("sports_bot")
 TZ = ZoneInfo("Asia/Taipei")
 MENU = ("歡迎使用【體育AI分析系統】！\n\n"
@@ -320,7 +320,7 @@ async def sports_report(sport, analysis=False, future=False):
     result = "\n".join(lines)
     return result[:4800]
 
-def offline_analysis(sport, matchup=None, team_history=None, star_players=None, league=None, recommended_team=None):
+def offline_analysis(sport, matchup=None, team_history=None, star_players=None, league=None, recommended_team=None, recent_metrics=None):
     """Offline hypothetical analysis; do not present invented data as real."""
     icons = {"足球": "⚽", "籃球": "🏀", "棒球": "⚾"}
     if not matchup:
@@ -359,49 +359,10 @@ def offline_analysis(sport, matchup=None, team_history=None, star_players=None, 
         focus = "① 先發投手與近期投球負荷\n② 牛棚可用性\n③ 打線、守備與球場條件"
         scenarios = f"{home}：看先發投手控球與牛棚。\n{away}：看中心打線長打及上壘。"
         result = "關鍵球員：雙方先發投手、中心打者。\n看點：三振保送比與得點圈打擊。"
-    # Stable demo pick; no fabricated win probabilities or market odds.
-    import hashlib
-    pick = int(hashlib.sha256((sport + "|" + str(league or "") + "|" + home + "|" + away).encode()).hexdigest()[:8], 16)
+    # No hash-generated fake betting recommendations.
     winner = recommended_team if recommended_team in (home, away) else None
-    if sport == "足球":
-        # Keep the demo total stable for the same matchup, but vary the line by matchup
-        # so every football card is not pinned to 2.5. This is still not a live market line.
-        football_lines = ("1.5", "2.0", "2.25", "2.5", "2.75", "3.0", "3.25", "3.5")
-        line = football_lines[(pick >> 3) % len(football_lines)]
-        direction = "大" if ((pick >> 1) & 1) else "小"
-        total = f"{direction} {line} 球"
-    elif sport == "籃球":
-        league = league or "NBA"
-        basketball_lines = {
-            "NBA": ("214.5", "218.5", "222.5", "226.5", "230.5", "234.5", "238.5"),
-            "NCAA": ("128.5", "133.5", "138.5", "143.5", "148.5", "153.5", "158.5"),
-            "NBL": ("165.5", "171.5", "177.5", "183.5", "189.5"),
-            "TPBL": ("156.5", "162.5", "168.5", "174.5", "180.5", "186.5"),
-        }
-        lines = basketball_lines.get(league, basketball_lines["NBA"])
-        line = lines[(pick >> 3) % len(lines)]
-        direction = "大" if ((pick >> 1) & 1) else "小"
-        total = f"{direction} {line} 分"
-    else:
-        # Vary baseball totals by matchup instead of pinning every card to 8.5.
-        # This remains a stable simulated direction, not a live sportsbook line.
-        baseball_lines = ("6.5", "7.0", "7.5", "8.0", "8.5", "9.0", "9.5", "10.0", "10.5", "11.0")
-        line = baseball_lines[(pick >> 4) % len(baseball_lines)]
-        direction = "大" if ((pick >> 2) & 1) else "小"
-        total = f"{direction} {line} 分"
-    # Without a verified sportsbook line, handicap is a clearly labelled scenario.
-    # A simulated handicap does NOT imply a measured edge or an actual offered market.
-    if sport == "足球":
-        handicap = (f"{winner} -0.5 球（情境模擬）" if winner else "資料不足，暫無推薦")
-        handicap_reason = "若支持隊伍僅平局，-0.5 不會過盤；須比較破門效率、陣容與對手防守。"
-    elif sport == "籃球":
-        demo_spread = (2.5, 4.5, 6.5, 8.5)
-        spread = demo_spread[(pick >> 5) % len(demo_spread)]
-        handicap = (f"{winner} -{spread:g} 分（情境模擬）" if winner else "資料不足，暫無推薦")
-        handicap_reason = f"須至少贏 {spread:g} 分以上才會過盤；考慮節奏、輪替、傷停與末節犯規。"
-    else:
-        handicap = (f"{winner} -1.5 分（情境模擬）" if winner else "資料不足，暫無推薦")
-        handicap_reason = "需贏 2 分以上才會過盤；應核實先發投手、牛棚、打線與主客場。"
+    total = (recent_metrics or {}).get("total") or "近期實際比分不足，暫無大小分參考"
+    handicap = (recent_metrics or {}).get("handicap") or "近期實際比分不足，暫無讓球參考"
     # Always show both sections. Distinguish verified facts from scouting criteria.
     if team_history:
         focus = team_history
@@ -438,12 +399,12 @@ def offline_analysis(sport, matchup=None, team_history=None, star_players=None, 
                         txt(f"{analysis_label} · 對戰情境分析", "xs", "#CBD5E1")]},
                 "body": {"type": "box", "layout": "vertical", "backgroundColor": "#FFFFFF",
                     "paddingAll": "12px", "spacing": "sm", "contents": [
-                        panel("📊 分析重點｜推薦隊伍戰績", focus),
-                        panel("⭐ 球員關鍵看點｜推薦隊伍", result),
+                        panel("📊 推薦隊伍｜近五場實際勝率", focus),
+                        panel("⭐ 推薦隊伍｜球員資訊", result),
                         {"type": "box", "layout": "vertical", "backgroundColor": "#0F172A",
                          "cornerRadius": "12px", "paddingAll": "13px", "spacing": "sm",
                          "contents": [
-                             txt("✦ 模擬推薦方向", "md", "#FDE68A", "bold"),
+                             txt("✦ 近期數據參考（非真實盤口）", "md", "#FDE68A", "bold"),
                              txt(f"🏆 獨贏  {winner or '資料不足，暫無推薦'}", "md", "#FFFFFF", "bold"),
                              {"type": "separator", "color": "#475569"},
                              txt(f"📊 大小分  {total}", "md", "#FFFFFF", "bold"),

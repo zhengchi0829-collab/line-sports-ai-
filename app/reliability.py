@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.6.53"
+VERSION = "0.6.54"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -759,7 +759,7 @@ class Controller:
             "NBA": "basketball/nba", "NCAA": "basketball/mens-college-basketball",
             "NBL": "basketball/nbl", "MLB": "baseball/mlb",
         }
-        fallback = ("⚠️ 無法核實近期戰績，暫不提供勝率。", "⚠️ 尚未取得可核實的球員名單。", None)
+        fallback = ("⚠️ 近五場真實賽果不足，暫無可核實勝率。", "⚠️ 尚未取得可核實的主力球員資料。", None, None)
         path = paths.get(league or {"足球":"德甲","籃球":"NBA","棒球":"MLB"}.get(sport))
         if not path:
             return fallback
@@ -796,6 +796,7 @@ class Controller:
                     *(self.fixtures.client.get(base + "/teams/" + ident + "/schedule") for ident in ids),
                     return_exceptions=True)
                 records = []
+                scores = []
                 for ident, response in zip(ids, responses):
                     played = []
                     if isinstance(response, httpx.Response) and response.status_code == 200:
@@ -819,30 +820,59 @@ class Controller:
                                 # Ties are common in football and count as played, not wins.
                                 outcome = "D" if sport == "足球" else "U"
                             if outcome != "U":
-                                played.append((event.get("date") or "", outcome))
+                                def real_score(value):
+                                    if isinstance(value, dict):
+                                        value = value.get("value", value.get("displayValue"))
+                                    try:
+                                        return float(value)
+                                    except (TypeError, ValueError):
+                                        return None
+                                mine_score = real_score(mine.get("score"))
+                                opponent = next((c for c in competitors if c is not mine), None)
+                                other_score = real_score(opponent.get("score")) if opponent else None
+                                played.append((event.get("date") or "", outcome, mine_score, other_score))
                     played.sort(reverse=True)
-                    recent = [outcome for _, outcome in played[:5]]
+                    recent_games = played[:5]
+                    recent = [outcome for _, outcome, _, _ in recent_games]
                     wins = recent.count("W")
                     draws = recent.count("D")
                     losses = recent.count("L")
                     records.append((wins, draws, losses, len(recent)))
-                if not any(rec[3] for rec in records):
-                    return fallback
-                form = []
-                for name, rec in zip((a, b), records):
-                    w, d, loss, n = rec
-                    form.append((f"{name}：近{n}場 {w}勝 {d}和 {loss}敗"
-                                 f"｜實際勝率 {w/n*100:.1f}%" if n else
-                                 f"{name}：近期賽果尚未取得"))
-                # Do not present a head-to-head prediction as an observed win percentage.
-                eligible = [(rec[0] / rec[3], rec[3], idx) for idx, rec in enumerate(records) if rec[3] >= 3]
+                    scores.append([(for_score, against_score)
+                                   for _, _, for_score, against_score in recent_games
+                                   if for_score is not None and against_score is not None])
+                # Compare both teams internally but display only the recommended team's form.
+                # No fabricated prediction probability. Ties count as played (not wins).
+                eligible = [(rec[0] / rec[3], rec[3], idx)
+                            for idx, rec in enumerate(records) if rec[3] >= 3]
                 chosen = None
+                chosen_index = None
                 if len(eligible) == 2 and eligible[0][0] != eligible[1][0]:
-                    chosen = (a, b)[max(eligible)[2]]
-                history = "【" + (league or sport) + "｜真實近況】\n" + "\n".join(form)
-                history += "\n勝率指近五場完賽勝場比例，不是本場預測勝率。"
-                if not chosen:
-                    return (history, "雙方近況無足夠差異或樣本不足，暫無可靠推薦主力名單。", None)
+                    chosen_index = max(eligible)[2]
+                    chosen = (a, b)[chosen_index]
+                if chosen_index is None:
+                    return ("近五場資料不足或雙方勝率相同，暫不推薦隊伍；不顯示虛構勝率。",
+                            "尚未有可核實的推薦隊伍主力球員資訊。", None, None)
+                wins, draws, losses, n = records[chosen_index]
+                history = (f"{chosen}｜近{n}場：{wins}勝、{draws}和、{losses}敗"
+                           f"｜實際勝率 {wins / n * 100:.1f}%"
+                           "\\n勝率是已完賽勝場比例，不是下一場的預測勝率。")
+                # Data-derived reference figures, NOT sportsbook prices or a betting edge.
+                metrics = None
+                if len(scores[0]) >= 3 and len(scores[1]) >= 3:
+                    totals = [sum(pair) for group in scores for pair in group]
+                    margins = [[x - y for x, y in group] for group in scores]
+                    total_avg = sum(totals) / len(totals)
+                    home_margin = sum(margins[0]) / len(margins[0])
+                    away_margin = sum(margins[1]) / len(margins[1])
+                    advantage = (home_margin - away_margin) / 2
+                    if sport == "足球":
+                        totals_text = f"近五場平均總進球 {total_avg:.2f} 球｜非盤口"
+                        margin_text = f"近況平均淨勝球差參考 {advantage:+.2f} 球｜非讓球盤"
+                    else:
+                        totals_text = f"近五場平均總分 {total_avg:.1f} 分｜非盤口"
+                        margin_text = f"近況平均分差參考 {advantage:+.1f} 分｜非讓分盤"
+                    metrics = {"total": totals_text, "handicap": margin_text}
                 selected_id = ids[0 if chosen == a else 1]
                 roster_response, leaders_response = await asyncio.gather(
                     self.fixtures.client.get(base + "/teams/" + selected_id + "/roster"),
@@ -884,7 +914,7 @@ class Controller:
                                (f"{chosen}｜ESPN 現役登錄球員（尚未核實主力／先發）："
                                 + "、".join(names[:5])) if names else
                                f"{chosen}｜尚無可驗證的主力球員名單。")
-                return (history, player_text, chosen)
+                return (history, player_text, chosen, metrics)
             except (httpx.HTTPError, ValueError, TypeError, KeyError, IndexError) as exc:
                 log.warning("verified_team_stats_failed league=%s reason=%s", league, type(exc).__name__)
                 return fallback
@@ -942,9 +972,11 @@ class Controller:
             parts = re.split(r"\s*(?:\bvs\.?\b|\u5c0d\u6230|\u5c0d|\uff0d|\u2014)\s*", matchup, maxsplit=1, flags=re.I)
             if len(parts) == 2 and all(p.strip() for p in parts):
                 a, b = (p.strip().lstrip(".").strip()[:35] for p in parts)
-                history, players, recommended = (None, None, None) if demo else await self.team_details(base_sport, a, b, league)
+                history, players, recommended, metrics = ((None, None, None, None) if demo else
+                                                         await self.team_details(base_sport, a, b, league))
                 card = self.ui.offline_analysis(base_sport, a + " vs " + b, history, players,
-                                                league=league, recommended_team=recommended)
+                                                league=league, recommended_team=recommended,
+                                                recent_metrics=metrics)
                 if isinstance(card, dict):
                     if league:
                         card["contents"]["header"]["contents"][-1]["text"] = f"{league} · 對戰情境分析"
