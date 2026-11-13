@@ -707,8 +707,6 @@ def baseball_menu() -> dict:
                                text("選擇要查看的聯盟", "sm", "#CBD5E1")]},
                 "body": {"type": "box", "layout": "vertical", "spacing": "sm", "paddingAll": "14px",
                          "contents": [
-                             button("📅 今日棒球賽事", TODAY + "棒球", "#0F766E"),
-                             button("📆 指定日期賽事", SPECIFIED, "#334155"),
                              button("⚾ MLB｜美國職棒", "MLB", "#7C3AED"),
                              button("⚾ NPB｜日本職棒", "NPB", "#B91C1C"),
                              button("⚾ KBO｜韓國職棒", "KBO", "#0369A1"),
