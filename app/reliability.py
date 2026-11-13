@@ -69,6 +69,43 @@ class Game:
     source: str = ""
     state: str = "scheduled"
     time_known: bool = True
+    home_score: int | None = None
+    away_score: int | None = None
+
+
+def final_score(value) -> int | None:
+    """Accept only actual nonnegative integer scores, not predicted points."""
+    if isinstance(value, dict):
+        value = value.get("value", value.get("score"))
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number = float(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    return int(number) if number >= 0 and number.is_integer() else None
+
+
+def score_only_card(game: Game, team_name) -> dict:
+    """Completed-event response with final score only; no analysis actions."""
+    home, away = team_name(game.home), team_name(game.away)
+    result = (f"{game.home_score}：{game.away_score}"
+              if game.home_score is not None and game.away_score is not None
+              else "比分未提供")
+    when = game.start.strftime("%Y/%m/%d %H:%M") if game.time_known else game.start.strftime("%Y/%m/%d")
+    return {"type": "flex", "altText": f"{when}｜{home} VS {away}｜{result}"[:400],
+            "contents": {"type": "bubble", "size": "kilo",
+                "header": {"type": "box", "layout": "vertical", "paddingAll": "14px",
+                           "backgroundColor": "#071A2D", "spacing": "xs",
+                           "contents": [
+                               text(when, "sm", "#8EF8FF", "bold"),
+                               text(f"{home} VS {away}", "md", "#FFFFFF", "bold")]},
+                "body": {"type": "box", "layout": "vertical", "paddingAll": "18px",
+                         "backgroundColor": "#061425", "spacing": "sm",
+                         "contents": [
+                             text("最終比分" if result != "比分未提供" else "賽果", "sm",
+                                  "#55EFFF", "bold"),
+                             text(result, "xxl", "#FFFFFF", "bold")]}}}
 
 
 def parse_feed(kind: str, data: Any, include_final: bool = False) -> list[Game]:
@@ -124,7 +161,12 @@ def parse_feed(kind: str, data: Any, include_final: bool = False) -> list[Game]:
                 item = Game(str(g["matchID"]), "soccer", "\u5fb7\u7532", dt,
                             h["teamName"], a["teamName"], h.get("teamIconUrl", ""),
                             a.get("teamIconUrl", ""), "OpenLigaDB",
-                            "final" if g.get("matchIsFinished") else "scheduled")
+                            "final" if g.get("matchIsFinished") else "scheduled",
+                            True,
+                            final_score((g.get("matchResults") or [{}])[-1].get("pointsTeam1"))
+                            if g.get("matchIsFinished") and g.get("matchResults") else None,
+                            final_score((g.get("matchResults") or [{}])[-1].get("pointsTeam2"))
+                            if g.get("matchIsFinished") and g.get("matchResults") else None)
             elif kind.startswith("nba"):
                 status = int(g.get("gameStatus", 1))
                 if status not in ((1, 2, 3) if include_final else (1, 2)):
@@ -140,7 +182,9 @@ def parse_feed(kind: str, data: Any, include_final: bool = False) -> list[Game]:
                 item = Game(str(g["gameId"]), "basketball", "NBA", instant(raw), nba_name(h),
                             nba_name(a), nba_logo(h), nba_logo(a), "NBA",
                             "final" if status == 3 else ("live" if status == 2 else "scheduled"),
-                            not bool(g.get("isTimeTBD")))
+                            not bool(g.get("isTimeTBD")),
+                            final_score(h.get("score")) if status == 3 else None,
+                            final_score(a.get("score")) if status == 3 else None)
             elif kind in ("mlb", "npb", "kbo", "milb", "npb_archive", "kbo_archive"):
                 status = g.get("status", {})
                 state = str(status.get("abstractGameState", ""))
@@ -166,7 +210,9 @@ def parse_feed(kind: str, data: Any, include_final: bool = False) -> list[Game]:
                             ("" if kind.endswith("_archive") else f"https://www.mlbstatic.com/team-logos/{a['id']}.svg"),
                             ("Public league score archive" if kind.endswith("_archive") else "MLB Stats API"),
                             "final" if is_final else ("live" if is_live else "scheduled"),
-                            not status.get("startTimeTBD", False))
+                            not status.get("startTimeTBD", False),
+                            final_score((g["teams"]["home"]).get("score")) if is_final else None,
+                            final_score((g["teams"]["away"]).get("score")) if is_final else None)
             elif kind == "cpbl":
                 cpbl_status = str(g.get("status", "")).lower()
                 if cpbl_status in ("postponed", "cancelled", "canceled") or (
@@ -185,7 +231,9 @@ def parse_feed(kind: str, data: Any, include_final: bool = False) -> list[Game]:
                             fallback_team_logo("baseball_cpbl", away_name),
                             "CPBL 2026 data",
                             "final" if cpbl_status in ("final", "finished") else "scheduled",
-                            bool(g.get("time")))
+                            bool(g.get("time")),
+                            final_score(g.get("home_score", g.get("homeScore"))) if cpbl_status in ("final", "finished") else None,
+                            final_score(g.get("away_score", g.get("awayScore"))) if cpbl_status in ("final", "finished") else None)
             else:
                 comp = g["competitions"][0]
                 status = comp.get("status", g.get("status", {})).get("type", {})
@@ -205,7 +253,13 @@ def parse_feed(kind: str, data: Any, include_final: bool = False) -> list[Game]:
                             espn_logo(h), espn_logo(a), "ESPN",
                             "final" if is_final else (
                                 "live" if status.get("state") == "in" else "scheduled"),
-                            comp.get("timeValid") is not False)
+                            comp.get("timeValid") is not False,
+                            final_score(next((c.get("score") for c in comp["competitors"]
+                                              if c.get("homeAway") == "home"), None))
+                            if is_final else None,
+                            final_score(next((c.get("score") for c in comp["competitors"]
+                                              if c.get("homeAway") == "away"), None))
+                            if is_final else None)
             if item.home.strip() and item.away.strip() and item.home != item.away:
                 out.append(item)
         except (KeyError, TypeError, ValueError, IndexError, AttributeError, StopIteration):
