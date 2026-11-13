@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.6.41"
+VERSION = "0.6.42"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -256,10 +256,16 @@ class Fixtures:
             return [("openliga", f"https://api.openligadb.de/getmatchdata/bl1/{season}", {}, "openliga")]
         for label, (key, slug) in SOCCER_LEAGUES.items():
             if sport == key:
-                date_range = now.strftime("%Y%m%d") + "-" + (now + timedelta(days=45)).strftime("%Y%m%d")
+                # ESPN often rejects long YYYYMMDD-YYYYMMDD ranges with HTTP 400.
+                # Monthly YYYYMM requests are supported and cover the next fixtures.
+                first = now.replace(day=1)
+                second = (first + timedelta(days=32)).replace(day=1)
+                months = (first, second)
                 feeds = [
-                    (key + "_espn", f"https://site.api.espn.com/apis/site/v2/sports/soccer/{slug}/scoreboard",
-                     {"dates": date_range, "limit": 250}, "soccer_" + slug),
+                    (f"{key}_espn_{month:%Y%m}",
+                     f"https://site.api.espn.com/apis/site/v2/sports/soccer/{slug}/scoreboard",
+                     {"dates": month.strftime("%Y%m"), "limit": 250}, "soccer_" + slug)
+                    for month in months
                 ]
                 if key == "soccer_bundesliga":
                     season = now.year if now.month >= 7 else now.year - 1
@@ -458,6 +464,10 @@ def notice(sport: str, snapshot: Snapshot) -> dict:
     demo = "\u6a21\u64ec\u5206\u6790" + SPORTS.get(sport, SPORTS["soccer"]) + " " + a + " vs " + b
     detail = ("\u8cc7\u6599\u4f86\u6e90\u66ab\u6642\u7121\u6cd5\u9023\u7dda\uff0c\u4e26\u4e0d\u4ee3\u8868\u6c92\u6709\u6bd4\u8cfd\u3002" if failed else
               "\u4f86\u6e90\u5df2\u56de\u61c9\uff0c\u76ee\u524d\u672a\u6536\u9304\u65b0\u7684\u672a\u958b\u8cfd\u8cfd\u7a0b\u3002")
+    if sport in SOCCER_LEAGUE_LABELS:
+        demo = "模擬分析" + name + " 曼城 vs 利物浦"
+        detail += "\n可輸入「分析" + name + " 主隊 vs 客隊」進行指定對戰情境分析。"
+
     return {"type": "flex", "altText": name + "\u8cfd\u7a0b\u72c0\u614b", "quickReply": quick_menu(),
             "contents": {"type": "bubble", "size": "kilo",
              "body": {"type": "box", "layout": "vertical", "spacing": "md",
@@ -685,7 +695,7 @@ class Controller:
             if len(parts) == 2 and all(p.strip() for p in parts):
                 a, b = (p.strip().lstrip(".").strip()[:35] for p in parts)
                 history, players = (None, None) if demo else await self.team_details(base_sport, a, b)
-                card = self.ui.offline_analysis(base_sport, a + " vs " + b, history, players, league=(basketball_league or baseball_league))
+                card = self.ui.offline_analysis(base_sport, a + " vs " + b, history, players, league=league)
                 if isinstance(card, dict):
                     if league:
                         card["contents"]["header"]["contents"][-1]["text"] = f"{league} · 對戰情境分析"
@@ -693,6 +703,34 @@ class Controller:
                         if buttons:
                             buttons[0]["action"]["label"] = f"🔎 其他{league}賽事"
                             buttons[0]["action"]["text"] = league
+                    if soccer_league and not demo:
+                        fixture_key = SOCCER_LEAGUES[soccer_league][0]
+                        snapshot = self.fixtures.last.get(fixture_key)
+                        if snapshot is not None:
+                            for game in snapshot.games:
+                                norm = lambda n: re.sub(r"[^\\w]", "", str(n)).casefold()
+                                requested = {norm(a), norm(b)}
+                                localized = {norm(self.ui.team_zh(game.home)), norm(self.ui.team_zh(game.away))}
+                                original = {norm(game.home), norm(game.away)}
+                                if requested == localized or requested == original:
+                                    header = card["contents"]["header"]["contents"]
+                                    header.append(text("🕒 台灣時間 " + game.start.strftime("%m/%d %H:%M"), "xs", "#CBD5E1"))
+                                    logos = [(game.home, game.home_logo), (game.away, game.away_logo)]
+                                    pictures = []
+                                    for title, logo in logos:
+                                        if isinstance(logo, str) and logo.startswith("https://"):
+                                            pictures.append({"type": "image",
+                                                "url": "https://wsrv.nl/?url=" + quote(logo, safe="") +
+                                                       "&w=100&h=100&fit=contain&output=png",
+                                                "size": "38px", "aspectRatio": "1:1", "aspectMode": "fit",
+                                                "flex": 0})
+                                        else:
+                                            pictures.append(text(self.ui.team_zh(title)[:4], "sm", "#334155"))
+                                    card["contents"]["body"]["contents"].insert(
+                                        0, {"type": "box", "layout": "horizontal", "alignItems": "center",
+                                            "justifyContent": "spaceAround", "spacing": "lg",
+                                            "contents": pictures})
+                                    break
                     if demo:
                         card["contents"]["header"]["contents"].append(text("\u6a21\u64ec\u5c0d\u6230 | \u975e\u771f\u5be6\u8cfd\u7a0b", "xs", "#FDE68A"))
                     card["quickReply"] = quick_menu()
