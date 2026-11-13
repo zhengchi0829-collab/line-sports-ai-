@@ -228,11 +228,9 @@ async def verified_baseball_analysis(client, league, home, away, translate=None)
                     sum(row[1]=="L" for row in g)) for g in games]
         rates = [record[0]/5 for record in records]
         net = [sum(x-y for _,_,x,y in group)/5 for group in games]
-        if rates[0] == rates[1] and net[0] == net[1]:
-            return ("兩隊歷史最近五場勝率相同，且淨得失分相同；暫無獨贏推薦。",
-                    "球員名單依資料來源提供。",None,None)
+        tied = rates[0] == rates[1] and net[0] == net[1]
         index = 0 if (rates[0],net[0]) > (rates[1],net[1]) else 1
-        winner = (home, away)[index]
+        winner = None if tied else (home, away)[index]
         # Show both verified teams; showing only the selected side hid the comparison.
         def form_line(team_name, record, group):
             wins, draws, losses = record
@@ -242,7 +240,7 @@ async def verified_baseball_analysis(client, league, home, away, translate=None)
         form = ("已核實歷史賽果（非勝率預測）\n" +
                 form_line(home, records[0], games[0]) + "\n" +
                 form_line(away, records[1], games[1]) +
-                "\n近期戰績較佳：" + winner)
+                "\n近期戰績較佳：" + (winner or "雙方相同，暫不推薦"))
         # Expected scores use recent-game weighted runs for/against (5 most recent first).
         weights=[5,4,3,2,1]
         points_for=[sum(w*g[2] for w,g in zip(weights,group))/15 for group in games]
@@ -261,20 +259,26 @@ async def verified_baseball_analysis(client, league, home, away, translate=None)
         metrics={"total":f"{tendency} {model_line:.1f} 分（歷史模型參考）｜預估 {expected_total:.1f} 分",
                  "handicap":f"{favored} -{spread:.1f} 分（模型 {coverage}）",
                  "expected_total":expected_total,"expected_margin":expected_margin}
-        names=[]
-        try:
-            roster=await client.get(base+f"/teams/{matches[index][0]['id']}/roster",
-                                    params={"rosterType":"active"},timeout=3)
-            if roster.status_code==200:
-                for item in roster.json().get("roster",[]):
-                    if isinstance(item,dict):
-                        name=(item.get("person") or {}).get("fullName")
+        async def fetch_roster(entry):
+            try:
+                team, _ = entry
+                response = await client.get(base + f"/teams/{team['id']}/roster",
+                                            params={"rosterType": "active"}, timeout=3)
+                response.raise_for_status()
+                names = []
+                for item in response.json().get("roster", []):
+                    if isinstance(item, dict):
+                        name = (item.get("person") or {}).get("fullName")
                         if name and name not in names:
                             names.append(name)
-        except httpx.HTTPError:
-            pass
-        players=(f"{winner}｜球隊登錄球員（非確定先發）："+ "、".join(names[:5])
-                 if names else f"{winner}｜目前沒有可核實的登錄球員名單。")
+                return names[:4]
+            except (httpx.HTTPError, ValueError, TypeError, KeyError):
+                return []
+        rosters = await asyncio.gather(*(fetch_roster(entry) for entry in matches))
+        players = "\n".join(
+            f"{name}｜登錄球員（非確定先發）：{', '.join(roster)}" if roster
+            else f"{name}｜暫無可核實登錄名單"
+            for name, roster in zip((home, away), rosters))
         return form,players,winner,metrics
     except (httpx.HTTPError, ValueError, TypeError, KeyError, IndexError) as exc:
         logger.warning("baseball_form_error league=%s kind=%s",league,type(exc).__name__)
