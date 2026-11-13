@@ -229,6 +229,7 @@ class Fixtures:
         self.cooldown: dict[str, float] = {}
         self.retry_after: dict[str, float] = {}
         self.last: dict[str, Snapshot] = {}
+        self.date_cache: dict[tuple[str, date], tuple[float, Snapshot]] = {}
 
     async def source(self, name: str, url: str, params: dict, kind: str,
                      include_final: bool = False) -> tuple[list[Game], str | None]:
@@ -268,7 +269,7 @@ class Fixtures:
                     return [game], None
                 parsed = parse_feed(kind, response.json(), include_final=include_final)
                 if kind == "milb":
-                    level = name.removeprefix("milb_")
+                    level = name.removeprefix("milb_").split("_date_")[0]
                     parsed = [replace(game, source="MiLB:" + level) for game in parsed]
                 return parsed, None
         except httpx.HTTPStatusError as exc:
@@ -361,6 +362,79 @@ class Fixtures:
         if sport == "baseball_cpbl":
             return [("cpbl", "https://raw.githubusercontent.com/pochih/cpbl2026/main/cpbl_data.json", {}, "cpbl")]
         return []
+
+    def specs_for_date(self, sport: str, selected: date) -> list[tuple]:
+        """Query the requested Taiwan calendar date; do not reuse today's fixture window."""
+        day = datetime.combine(selected, datetime.min.time(), tzinfo=TZ)
+        dates = ((day - timedelta(days=1)).strftime("%Y%m%d"), day.strftime("%Y%m%d"))
+        if sport == "basketball":
+            base = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard"
+            result = [(f"nba_date_{d}", base, {"dates": d, "limit": 250}, "espn")
+                      for d in dates]
+        elif sport in ("basketball_ncaa", "basketball_nbl"):
+            slug = "mens-college-basketball" if sport == "basketball_ncaa" else "nbl"
+            base = f"https://site.api.espn.com/apis/site/v2/sports/basketball/{slug}/scoreboard"
+            result = [(f"{sport}_{d}", base, {"dates": d, "limit": 250}, "espn")
+                      for d in dates]
+        elif sport in SOCCER_LEAGUE_LABELS:
+            league = SOCCER_LEAGUE_LABELS[sport]
+            slug = SOCCER_LEAGUES[league][1]
+            base = f"https://site.api.espn.com/apis/site/v2/sports/soccer/{slug}/scoreboard"
+            months = sorted({day.strftime("%Y%m"), (day - timedelta(days=1)).strftime("%Y%m")})
+            result = [(f"{sport}_{month}", base, {"dates": month, "limit": 250},
+                       "soccer_" + slug) for month in months]
+            if sport == "soccer_bundesliga":
+                season = day.year if day.month >= 7 else day.year - 1
+                result.append(("openliga_date_backup",
+                               f"https://api.openligadb.de/getmatchdata/bl1/{season}", {},
+                               "openliga"))
+        else:
+            result = self.specs(sport, day)
+            if sport in ("baseball", "baseball_milb"):
+                start = (day - timedelta(days=1)).strftime("%Y-%m-%d")
+                end = (day + timedelta(days=1)).strftime("%Y-%m-%d")
+                result = [(name, url, {**params, "startDate": start, "endDate": end}, kind)
+                          for name, url, params, kind in result]
+        return [(f"{name}_date_{selected.isoformat()}", url, params, kind)
+                for name, url, params, kind in result]
+
+    async def on_date(self, sport: str, selected: date) -> Snapshot:
+        """Fetch an exact-date snapshot without contaminating live/upcoming caches."""
+        key = (sport, selected)
+        cached = self.date_cache.get(key)
+        if cached and time.monotonic() - cached[0] < 240:
+            return cached[1]
+        specs = self.specs_for_date(sport, selected)
+        if not specs:
+            return Snapshot(errors=["no_source_for_date"])
+        results = await asyncio.gather(
+            *(self.source(*spec, include_final=True) for spec in specs),
+            return_exceptions=True)
+        unique = {}
+        errors = []
+        successes = 0
+        for result in results:
+            if isinstance(result, BaseException):
+                errors.append("source_exception")
+                continue
+            games, error = result
+            if error:
+                errors.append(error)
+            else:
+                successes += 1
+            for game in games:
+                if game.start.date() != selected:
+                    continue
+                signature = (game.start.isoformat(), game.home.casefold(), game.away.casefold())
+                unique.setdefault(signature, game)
+        snap = Snapshot(sorted(unique.values(), key=lambda game: game.start),
+                        datetime.now(TZ), errors, successes)
+        if len(self.date_cache) >= 120:
+            self.date_cache.pop(next(iter(self.date_cache)))
+        self.date_cache[key] = (time.monotonic(), snap)
+        log.info("dated_fixture_result sport=%s date=%s count=%s successes=%s failures=%s",
+                 sport, selected, len(snap.games), successes, len(errors))
+        return snap
 
     async def refresh(self, sport: str) -> Snapshot:
         now = datetime.now(TZ)
