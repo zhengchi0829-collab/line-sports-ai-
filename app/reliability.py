@@ -1557,9 +1557,9 @@ class Controller:
                             cells[6]["text"]="⚖️ 讓球  此來源未提供"
                         cells.append(text("盤口更新："+str(actual_market.get("updated") or "未提供")[:19],"xs","#CBD5E1"))
                     else:
-                        cells[0]["text"]="✦ 歷史模型參考｜無已核實盤口"
-                        cells[3]["text"]="📊 大小分 "+((metrics or {}).get("total") or "未取得實際盤口")
-                        cells[5]["text"]="⚖️ 讓球 "+((metrics or {}).get("handicap") or "未取得實際盤口")
+                        cells[0]["text"]="✦ 歷史模型參考"
+                        cells[3]["text"]="📊 大小分 "+((metrics or {}).get("total") or "資料不足")
+                        cells[5]["text"]="⚖️ 讓球 "+((metrics or {}).get("handicap") or "資料不足")
                 if isinstance(card, dict):
                     if league:
                         header_contents = card["contents"]["header"]["contents"]
@@ -1610,8 +1610,33 @@ class Controller:
                                             "justifyContent": "center", "spacing": "lg",
                                             "contents": pictures})
                                     break
+                    # Keep title to actual date/time and two short Chinese team names.
+                    event_time = matched_game.start if matched_game else kickoff
+                    stamp = (event_time.strftime("%Y/%m/%d %H:%M")
+                             if event_time else
+                             (requested_date.strftime("%Y/%m/%d") + " 時間待確認"
+                              if requested_date else "日期／時間待確認"))
+                    card["contents"]["header"]["contents"] = [
+                        text(stamp, "sm", "#8EF8FF", "bold"),
+                        text(f"{self.ui.team_zh(a)} VS {self.ui.team_zh(b)}",
+                             "md", "#FFFFFF", "bold"),
+                    ]
+                    if matched_game and matched_game.state == "final":
+                        card["contents"]["body"]["contents"].insert(
+                            0, text("歷史回測｜非賽前即時預測", "xs", "#FDE68A"))
                     if demo:
-                        card["contents"]["header"]["contents"].append(text("\u6a21\u64ec\u5c0d\u6230 | \u975e\u771f\u5be6\u8cfd\u7a0b", "xs", "#FDE68A"))
+                        card["contents"]["body"]["contents"].insert(
+                            0, text("模擬分析｜非真實賽程", "xs", "#FDE68A"))
+                    # Rounded to 0.5 units. This is a model estimate, not a result.
+                    if metrics is not None:
+                        total_value = metrics.get("expected_total")
+                        margin_value = metrics.get("expected_margin")
+                        if isinstance(total_value, (int, float)) and isinstance(margin_value, (int, float)):
+                            home_est = max(0.0, round(total_value + margin_value) / 2)
+                            away_est = max(0.0, round(total_value - margin_value) / 2)
+                            cells.insert(1, text(
+                                f"模型預估比分 {home_est:.1f}：{away_est:.1f}",
+                                "md", "#FFFFFF", "bold"))
                     card["quickReply"] = quick_menu()
                     return [card]
             return [{"type": "text", "text": "\u8acb\u9ede\u9078\u8cfd\u4e8b\u5361\u7247\u7684\u300c\u7acb\u5373\u5206\u6790\u300d\u3002", "quickReply": quick_menu()}]
