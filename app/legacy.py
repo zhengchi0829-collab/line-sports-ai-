@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 
-app = FastAPI(title="體育AI分析系統", version="0.6.48")
+app = FastAPI(title="體育AI分析系統", version="0.6.49")
 log = logging.getLogger("sports_bot")
 TZ = ZoneInfo("Asia/Taipei")
 MENU = ("歡迎使用【體育AI分析系統】！\n\n"
@@ -443,14 +443,12 @@ def offline_analysis(sport, matchup=None, team_history=None, star_players=None, 
                         {"type": "box", "layout": "vertical", "backgroundColor": "#0F172A",
                          "cornerRadius": "12px", "paddingAll": "13px", "spacing": "sm",
                          "contents": [
-                             txt("✦ 推薦方向", "md", "#FDE68A", "bold"),
+                             txt("✦ 模擬推薦方向", "md", "#FDE68A", "bold"),
                              txt(f"🏆 獨贏  {winner}", "md", "#FFFFFF", "bold"),
                              {"type": "separator", "color": "#475569"},
                              txt(f"📊 大小分  {total}", "md", "#FFFFFF", "bold"),
                              {"type": "separator", "color": "#475569"},
-                             txt(f"⚖️ 讓球  {handicap}", "md", "#FFFFFF", "bold"),
-                             txt(handicap_reason, "xs", "#CBD5E1"),
-                             txt("以上為情境模擬，非平台實際盤口或已驗證勝率", "xxs", "#CBD5E1")
+                             txt(f"⚖️ 讓球  {handicap}", "md", "#FFFFFF", "bold")
                          ]}
                     ]},
                 "footer": {"type": "box", "layout": "vertical", "backgroundColor": "#FFFFFF",
