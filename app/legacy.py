@@ -401,6 +401,49 @@ def offline_analysis(sport, matchup=None, team_history=None, star_players=None, 
             if original != translated:
                 value = value.replace(original, translated)
         return value
+    # Compact, verified presentation: no invented named players or win odds.
+    def brief_history(value):
+        import re
+        lines = [line.strip() for line in str(value or "").splitlines() if line.strip()]
+        picks = []
+        for line in lines:
+            # Source formats: "Team｜最近5場 3勝1和1敗｜歷史勝率 60%"
+            match = re.search(r"(?:近5場|最近五場|歷史最近五場)[：:\s]*"
+                              r"(\d+)勝[、\s]*(\d+)和[、\s]*(\d+)敗", line)
+            if match:
+                who = line.split("｜", 1)[0].split("：", 1)[0].strip()
+                wins, draws, losses = (int(v) for v in match.groups())
+                picks.append(f"{who} {wins}勝{draws}和{losses}敗（{wins * 20}%）")
+        if picks:
+            return "\\n".join(picks[:2])
+        if "勝率" in str(value) and "勝" in str(value):
+            return str(value).split("｜資料截至")[0][:100]
+        return "近五場資料不足，暫無推薦"
+
+    def brief_players(value):
+        import re
+        source = str(value or "")
+        if not source or any(key in source for key in
+                             ("沒有可核實", "尚無可核實", "暫無可核實",
+                              "尚未核實", "未核實", "資料待核實", "資料不足")):
+            return "球員資料不足"
+        names = []
+        for line in source.splitlines():
+            if "：" not in line and ":" not in line:
+                continue
+            tail = re.split(r"[：:]", line, maxsplit=1)[-1]
+            for candidate in re.split(r"[、,，]", tail):
+                candidate = candidate.strip()
+                if candidate and len(candidate) <= 45 and candidate not in names:
+                    names.append(candidate)
+                if len(names) >= 3:
+                    break
+            if len(names) >= 3:
+                break
+        return "、".join(names[:3]) if names else "球員資料不足"
+
+    focus = brief_history(focus)
+    result = brief_players(result)
     focus = bilingual_text(focus)
     result = bilingual_text(result)
     total = bilingual_text(total)
@@ -415,13 +458,13 @@ def offline_analysis(sport, matchup=None, team_history=None, star_players=None, 
                         txt(f"{analysis_label} · 對戰情境分析", "xs", "#CBD5E1")]},
                 "body": {"type": "box", "layout": "vertical", "backgroundColor": "#FFFFFF",
                     "paddingAll": "12px", "spacing": "sm", "contents": [
-                        panel("📊 推薦隊伍｜歷史五場戰績勝率", focus),
-                        panel("⭐ 推薦隊伍｜球員資訊", result),
+                        panel("📊 近五場戰績", focus),
+                        panel("⭐ 球員", result),
                         {"type": "box", "layout": "vertical", "backgroundColor": "#0F172A",
                          "cornerRadius": "12px", "paddingAll": "13px", "spacing": "sm",
                          "contents": [
-                             txt("✦ 歷史五場模型分析（非盤口）", "md", "#FDE68A", "bold"),
-                             txt(f"🏆 獨贏  {winner_display or '資料不足，暫無推薦'}", "md", "#FFFFFF", "bold"),
+                             txt("✦ 賽事重點", "md", "#FDE68A", "bold"),
+                             txt(f"🏆 推薦  {winner_display or '暫不推薦'}", "md", "#FFFFFF", "bold"),
                              {"type": "separator", "color": "#475569"},
                              txt(f"📊 大小分  {total}", "md", "#FFFFFF", "bold"),
                              {"type": "separator", "color": "#475569"},
