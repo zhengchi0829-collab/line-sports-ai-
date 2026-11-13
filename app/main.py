@@ -106,6 +106,40 @@ async def continuous_refresh(app):
                     failures += 1
             app.state.last_background_refresh = time.time()
             app.state.background_refresh_counts = counts
+            # Once per startup, validate real soccer fixture and analysis cards
+            # against the LINE payload schema; this sends no user-facing messages.
+            if not app.state.soccer_validation_done:
+                app.state.soccer_validation_done = True
+                token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "").strip()
+                if token:
+                    headers = {"Authorization": "Bearer " + token}
+                    labels = ("英超", "西甲", "德甲", "義甲", "法甲", "歐冠")
+                    soccer_keys = dict(zip(labels, REFRESH_KEYS[1:7]))
+                    for label, key in soccer_keys.items():
+                        snapshot = app.state.controller.fixtures.last.get(key)
+                        if not snapshot or not snapshot.games:
+                            log.warning("soccer_analysis_validation league=%s status=no_games", label)
+                            continue
+                        game = next((g for g in snapshot.games
+                                     if g.state == "live" or g.start >= datetime.now(TZ)), None)
+                        if game is None:
+                            log.warning("soccer_analysis_validation league=%s status=no_upcoming", label)
+                            continue
+                        try:
+                            card = fixture_cards(key, snapshot, ui.team_zh)
+                            response = await app.state.line_client.post(
+                                "https://api.line.me/v2/bot/message/validate/reply",
+                                headers=headers, json={"messages": [card]})
+                            log.info("soccer_fixture_validation league=%s status=%s", label, response.status_code)
+                            analysis = await app.state.controller.reply(
+                                f"分析{label} {game.home} vs {game.away}")
+                            response = await app.state.line_client.post(
+                                "https://api.line.me/v2/bot/message/validate/reply",
+                                headers=headers, json={"messages": analysis})
+                            log.info("soccer_analysis_validation league=%s status=%s", label, response.status_code)
+                        except Exception as exc:
+                            log.error("soccer_analysis_validation league=%s error=%s",
+                                      label, type(exc).__name__)
             log.info(
                 "background_refresh version=%s keys=%s failures=%s elapsed_ms=%d",
                 VERSION, len(REFRESH_KEYS), failures,
@@ -125,6 +159,7 @@ async def lifespan(app):
     app.state.line_validation = None
     app.state.last_background_refresh = None
     app.state.background_refresh_counts = {}
+    app.state.soccer_validation_done = False
     async with httpx.AsyncClient(timeout=httpx.Timeout(3.5, connect=2), follow_redirects=True,
                                  limits=httpx.Limits(max_connections=12)) as source_client, \
                httpx.AsyncClient(timeout=httpx.Timeout(5, connect=2)) as line_client:

@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.6.42"
+VERSION = "0.6.43"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -708,7 +708,7 @@ class Controller:
                         snapshot = self.fixtures.last.get(fixture_key)
                         if snapshot is not None:
                             for game in snapshot.games:
-                                norm = lambda n: re.sub(r"[^\\w]", "", str(n)).casefold()
+                                norm = lambda n: re.sub(r"[^\w]", "", str(n)).casefold()
                                 requested = {norm(a), norm(b)}
                                 localized = {norm(self.ui.team_zh(game.home)), norm(self.ui.team_zh(game.away))}
                                 original = {norm(game.home), norm(game.away)}
