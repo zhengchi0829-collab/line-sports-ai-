@@ -1590,6 +1590,8 @@ class Controller:
                                                 league=league, recommended_team=recommended,
                                                 recent_metrics=metrics)
                 if isinstance(card, dict):
+                    panel = card["contents"]["body"]["contents"][-1]
+                    cells = panel.get("contents", [])
                     if league:
                         header_contents = card["contents"]["header"]["contents"]
                         header_contents[-1]["text"] = f"{league} · 已選賽事分析"
