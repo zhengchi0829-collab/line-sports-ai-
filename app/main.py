@@ -184,7 +184,7 @@ async def continuous_refresh(app):
                         context = await app.state.controller.team_details(
                             sport_name, game.home, game.away, league)
                         log.info("verified_stats_probe league=%s form=%s roster=%s recommendation=%s",
-                                 league, "實際勝率" in context[0],
+                                 league, "勝率" in context[0],
                                  "球員" in context[1], bool(context[2]))
                     except Exception as exc:
                         log.error("verified_stats_probe league=%s exception=%s",

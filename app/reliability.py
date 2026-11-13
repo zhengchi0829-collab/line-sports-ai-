@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.6.57"
+VERSION = "0.6.58"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -878,8 +878,14 @@ class Controller:
                 if len(scores[0]) == 5 and len(scores[1]) == 5:
                     # Team-specific expected scoring from each team's last five scored
                     # and conceded points/goals. A simple form estimator, not market odds.
-                    avg_for = [sum(x for x, _ in group) / 5 for group in scores]
-                    avg_against = [sum(y for _, y in group) / 5 for group in scores]
+                    # Played games are newest first. Weight the most recent result
+                    # highest for projection while retaining the five-game sample.
+                    weights = (5, 4, 3, 2, 1)
+                    weight_sum = sum(weights)
+                    avg_for = [sum(weights[i] * x for i, (x, _) in enumerate(group)) / weight_sum
+                               for group in scores]
+                    avg_against = [sum(weights[i] * y for i, (_, y) in enumerate(group)) / weight_sum
+                                   for group in scores]
                     expected_home = (avg_for[0] + avg_against[1]) / 2
                     expected_away = (avg_for[1] + avg_against[0]) / 2
                     expected_total = expected_home + expected_away
@@ -888,8 +894,8 @@ class Controller:
                     historical_mean = sum(historical_totals) / len(historical_totals)
                     # Internal reference threshold derived from history, not an offered line.
                     reference = (round(historical_mean * 2) / 2)
-                    total_direction = ("大" if expected_total > reference + 0.2 else
-                                       ("小" if expected_total < reference - 0.2 else "接近參考線"))
+                    total_direction = ("大" if expected_total > reference + 0.15 else
+                                       ("小" if expected_total < reference - 0.15 else "接近參考線"))
                     unit = "球" if sport == "足球" else "分"
                     total_text = (f"{total_direction} {reference:g} {unit}（歷史模型參考線）"
                                   f"｜預估合計 {expected_total:.1f} {unit}")
