@@ -74,11 +74,108 @@ def finished_matches(payload, team_id):
     return sorted(results, key=lambda row: row[0], reverse=True)[:5]
 
 
+
+CPBL_TEAMS = {
+    "AAA":"味全龍", "AEO":"富邦悍將", "AKP":"台鋼雄鷹",
+    "ACN":"中信兄弟", "AJL":"樂天桃猿", "ADD":"統一7-ELEVEn獅",
+}
+
+
+async def verified_cpbl_analysis(client, home, away, translate=None):
+    """Use the dated CPBL 2026 snapshot. Historical only; never call it live."""
+    try:
+        response = await client.get(
+            "https://raw.githubusercontent.com/pochih/cpbl2026/main/cpbl_data.json",
+            timeout=3.5)
+        response.raise_for_status()
+        document=response.json()
+        if not isinstance(document,dict):
+            return UNAVAILABLE
+        lookup=document.get("teams") or {}
+        def match_code(wanted):
+            scored=[]
+            for code,record in lookup.items():
+                if not isinstance(record,dict):continue
+                aliases=[record.get("name",""),record.get("abbr",""),CPBL_TEAMS.get(code,"")]
+                points=max((similarity(n,wanted,translate) for n in aliases),default=0)
+                scored.append((points,code))
+            return max(scored,default=(0,None))
+        h_score,h_code=match_code(home)
+        a_score,a_code=match_code(away)
+        if min(h_score,a_score)<0.72 or not h_code or not a_code or h_code==a_code:
+            return UNAVAILABLE
+        groups=[]
+        for code in (h_code,a_code):
+            played=[]
+            for game in document.get("games",[]):
+                if not isinstance(game,dict):continue
+                if str(game.get("status","")).lower() not in ("final","finished"):
+                    continue
+                if code not in (game.get("home"),game.get("away")):continue
+                try:
+                    hs,ass=int(game["hs"]),int(game["as"])
+                    if hs<0 or ass<0:continue
+                except (ValueError,TypeError,KeyError):
+                    continue
+                home_side=code==game.get("home")
+                own,other=(hs,ass) if home_side else (ass,hs)
+                outcome="W" if own>other else "L" if own<other else "D"
+                played.append((str(game.get("date") or ""),outcome,float(own),float(other)))
+            played.sort(key=lambda x:x[0],reverse=True)
+            groups.append(played[:5])
+        if any(len(group)<5 for group in groups):
+            return UNAVAILABLE
+        records=[(sum(g[1]=="W" for g in group),
+                  sum(g[1]=="D" for g in group),
+                  sum(g[1]=="L" for g in group)) for group in groups]
+        rates=[x[0]/5 for x in records]
+        net=[sum(x[2]-x[3] for x in group)/5 for group in groups]
+        if rates[0]==rates[1] and net[0]==net[1]:
+            return ("兩隊歷史最近五場勝率和淨得失分相同，暫不推薦。",
+                    "球員排行可查詢，但本場暫無主力推薦。",None,None)
+        index=0 if (rates[0],net[0])>(rates[1],net[1]) else 1
+        team=(home,away)[index]
+        code=(h_code,a_code)[index]
+        wins,draws,losses=records[index]
+        stamp=str(document.get("updated") or "未提供")
+        history=(f"{team}｜歷史最近五場：{wins}勝、{draws}和、{losses}敗"
+                 f"｜勝率 {wins*20:.1f}%｜資料截至 {stamp[:16]}")
+        weights=[5,4,3,2,1]
+        attack=[sum(w*g[2] for w,g in zip(weights,group))/15 for group in groups]
+        defense=[sum(w*g[3] for w,g in zip(weights,group))/15 for group in groups]
+        expected_home=(attack[0]+defense[1])/2
+        expected_away=(attack[1]+defense[0])/2
+        total=expected_home+expected_away
+        margin=expected_home-expected_away
+        baseline=sum(x[2]+x[3] for group in groups for x in group)/10
+        model_line=math.floor(baseline)+0.5
+        tendency=("大" if total>model_line+0.15 else "小" if total<model_line-0.15 else "接近參考線")
+        favored=home if margin>=0 else away
+        metrics={"total":f"{tendency} {model_line:.1f} 分（歷史模型參考）｜預估 {total:.1f} 分",
+                 "handicap":f"{favored} -1.5 分（模型"+("支持" if abs(margin)>1.8 else "差距不足")+"）",
+                 "expected_total":total,"expected_margin":margin}
+        named=[]
+        for group in (document.get("leaders") or {}).values():
+            if not isinstance(group,dict):continue
+            for category,leaders in group.items():
+                if not isinstance(leaders,list):continue
+                for item in leaders:
+                    if not isinstance(item,list) or len(item)<2:continue
+                    if item[1]==code and item[0] not in named:
+                        named.append(str(item[0]))
+        players=(f"{team}｜2026 賽季數據榜上球員（非確定先發）："+ "、".join(named[:5])
+                 if named else f"{team}｜沒有可核實的主力球員資料。")
+        return history,players,team,metrics
+    except (httpx.HTTPError,ValueError,TypeError,KeyError,IndexError) as exc:
+        logger.warning("cpbl_history_unavailable kind=%s",type(exc).__name__)
+        return UNAVAILABLE
+
 async def verified_baseball_analysis(client, league, home, away, translate=None):
     """Return (form, roster, winner, metrics) with no fake observed statistics."""
+    if league == "CPBL":
+        return await verified_cpbl_analysis(client,home,away,translate)
     sid = SPORT_IDS.get(league)
     if sid is None:
-        # CPBL must use its own verified scores; MLB Stats API is not a CPBL feed.
         return UNAVAILABLE
     base = "https://statsapi.mlb.com/api/v1"
     try:
