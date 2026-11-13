@@ -237,11 +237,19 @@ async def dated_flow_probe(app):
                       and selected.strftime("%Y/%m/%d")
                       in str(analysis[0].get("contents", {}).get("header", {})))
             if ok:
-                detail = str(analysis[0]["contents"]["body"]["contents"][0]
-                             ["contents"][1].get("text", ""))
-                ok = "勝率" in detail and "尚無可核實" not in detail
+                # The compact design no longer has the old "勝率" label/position.
+                panels = analysis[0]["contents"]["body"]["contents"]
+                history_panels = [
+                    item for item in panels if isinstance(item, dict)
+                    and item.get("type") == "box"
+                    and "近五場戰績" in str(item.get("contents", [])[:1])
+                ]
+                ok = bool(history_panels and any(
+                    "%" in str(item) and "勝" in str(item)
+                    and "資料不足" not in str(item)
+                    for item in history_panels))
             if not ok:
-                raise AssertionError("dated analysis missing verified pregame five-game form")
+                raise AssertionError("dated analysis missing verified compact five-game record")
             token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "").strip()
             if token:
                 response = await app.state.line_client.post(
