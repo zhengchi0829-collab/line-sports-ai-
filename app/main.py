@@ -110,6 +110,41 @@ async def startup_probe(app):
         log.error("startup_probe failed=%s", type(exc).__name__)
 
 
+async def inspect_line_rich_menu(app):
+    """Log button action types for the default LINE rich menu, never user data."""
+    token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "").strip()
+    if not token:
+        return
+    headers = {"Authorization": "Bearer " + token}
+    try:
+        default = await app.state.line_client.get(
+            "https://api.line.me/v2/bot/user/all/richmenu", headers=headers)
+        if default.status_code != 200:
+            log.warning("line_richmenu_default status=%s", default.status_code)
+            return
+        menu_id = default.json().get("richMenuId")
+        if not menu_id:
+            log.warning("line_richmenu_default missing_id")
+            return
+        details = await app.state.line_client.get(
+            "https://api.line.me/v2/bot/richmenu/" + menu_id, headers=headers)
+        if details.status_code != 200:
+            log.warning("line_richmenu_detail status=%s", details.status_code)
+            return
+        menu = details.json()
+        actions = [{
+            "type": area.get("action", {}).get("type"),
+            "text": str(area.get("action", {}).get("text", ""))[:35],
+            "data": str(area.get("action", {}).get("data", ""))[:35],
+            "uri": bool(area.get("action", {}).get("uri")),
+        } for area in menu.get("areas", [])]
+        log.warning("line_richmenu_actions count=%s actions=%s",
+                    len(actions), actions)
+        app.state.richmenu_check = {"action_count": len(actions), "actions": actions}
+    except (httpx.HTTPError, ValueError, TypeError, KeyError) as exc:
+        log.warning("line_richmenu_inspect_error kind=%s", type(exc).__name__)
+
+
 async def verify_line_webhook(app):
     """Inspect LINE webhook configuration and repair a stale endpoint if possible."""
     token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "").strip()
@@ -347,6 +382,7 @@ async def lifespan(app):
     app.state.soccer_validation_done = False
     app.state.date_probe_status = {}
     app.state.webhook_check = {"status": "checking"}
+    app.state.richmenu_check = {"status": "checking"}
     async with httpx.AsyncClient(timeout=httpx.Timeout(3.5, connect=2), follow_redirects=True,
                                  limits=httpx.Limits(max_connections=12)) as source_client, \
                httpx.AsyncClient(timeout=httpx.Timeout(5, connect=2)) as line_client:
@@ -356,17 +392,20 @@ async def lifespan(app):
         refresher = asyncio.create_task(continuous_refresh(app))
         dated_probe = asyncio.create_task(dated_flow_probe(app))
         webhook_probe = asyncio.create_task(verify_line_webhook(app))
+        richmenu_probe = asyncio.create_task(inspect_line_rich_menu(app))
         yield
         probe.cancel()
         refresher.cancel()
         dated_probe.cancel()
         webhook_probe.cancel()
+        richmenu_probe.cancel()
         active = list(app.state.pending)
         if active:
             done, unfinished = await asyncio.wait(active, timeout=4)
             for task in unfinished:
                 task.cancel()
         await asyncio.gather(probe, refresher, dated_probe, webhook_probe,
+                             richmenu_probe,
                              *active, return_exceptions=True)
         await app.state.controller.close()
     # Keep the existing LINE default rich menu. Recreating it on every deploy
@@ -398,7 +437,8 @@ async def feature_health():
             },
             "pending_events": len(app.state.pending),
             "dated_analysis_probe": app.state.date_probe_status,
-            "line_webhook": app.state.webhook_check}
+            "line_webhook": app.state.webhook_check,
+            "richmenu": app.state.richmenu_check}
 
 
 async def _push_fallback(event, app, token: str, text_value: str) -> bool:
