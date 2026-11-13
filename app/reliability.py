@@ -899,6 +899,9 @@ def fixture_cards(sport: str, snapshot: Snapshot, team_name, today=False, now=No
     accent = colors[sport]
     bubbles = []
     for g in games:
+        if g.state == "final":
+            bubbles.append(score_only_card(g, team_name)["contents"])
+            continue
         home, away = team_display(g.home), team_display(g.away)
         home_logo = fallback_team_logo(sport, g.home, g.home_logo)
         away_logo = fallback_team_logo(sport, g.away, g.away_logo)
@@ -938,7 +941,7 @@ def fixture_cards(sport: str, snapshot: Snapshot, team_name, today=False, now=No
                     baseball_league_label(sport) if sport.startswith("baseball") else
                     SOCCER_LEAGUE_LABELS.get(sport, SPORTS.get(sport, sport))) +
                     f" {g.start:%Y-%m-%d} {g.home} vs {g.away}", accent)]}})
-    return {"type": "flex", "altText": (basketball_league_label(sport) if sport.startswith("basketball") else (baseball_league_label(sport) if sport.startswith("baseball") else SOCCER_LEAGUE_LABELS.get(sport, SPORTS.get(sport, sport)))) + "\u8fd1\u671f\u8cfd\u4e8b\uff5c\u9ede\u9078\u5206\u6790",
+    return {"type": "flex", "altText": (basketball_league_label(sport) if sport.startswith("basketball") else (baseball_league_label(sport) if sport.startswith("baseball") else SOCCER_LEAGUE_LABELS.get(sport, SPORTS.get(sport, sport)))) + "｜賽事比分與賽程",
             "quickReply": quick_menu(), "contents": {"type": "carousel", "contents": bubbles}}
 
 
@@ -1539,6 +1542,8 @@ class Controller:
                         message += "\n資料來源部分無法連線，賽事可能尚未更新。"
                     return [{"type": "text", "text": message,
                              "quickReply": quick_menu()}]
+                if matched_game is not None and matched_game.state == "final":
+                    return [score_only_card(matched_game, self.ui.team_zh)]
                 retrospective_other_sport = bool(
                     requested_date and base_sport != "棒球" and
                     (requested_date < datetime.now(TZ).date()
