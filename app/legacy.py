@@ -413,7 +413,7 @@ def offline_analysis(sport, matchup=None, team_history=None, star_players=None, 
             if match:
                 who = line.split("｜", 1)[0].split("：", 1)[0].strip()
                 wins, draws, losses = (int(v) for v in match.groups())
-                picks.append(f"{who} {wins}勝{draws}和{losses}敗（{wins * 20}%）")
+                picks.append(f"{team_zh(who)} {wins}勝{draws}和{losses}敗（{wins * 20}%）")
         if picks:
             return "\n".join(picks[:2])
         if "勝率" in str(value) and "勝" in str(value):
@@ -447,11 +447,19 @@ def offline_analysis(sport, matchup=None, team_history=None, star_players=None, 
 
     focus = brief_history(focus)
     result = brief_players(result)
-    focus = bilingual_text(focus)
-    result = bilingual_text(result)
-    total = bilingual_text(total)
-    handicap = bilingual_text(handicap)
-    winner_display = team_display(winner) if winner else None
+    # Short names only on analysis; roster names are left as provided.
+    import re
+    for original in (home, away):
+        total = str(total).replace(original, team_zh(original))
+        handicap = str(handicap).replace(original, team_zh(original))
+    # Format all model-estimated amounts in 0.5-unit increments.
+    total = re.sub(
+        r"(預估(?:合計)?\\s*)(\\d+(?:\\.\\d+)?)",
+        lambda match: match.group(1) + f"{round(float(match.group(2)) * 2) / 2:.1f}",
+        total)
+    total = re.sub(r"（(?:歷史模型參考線|歷史模型參考|歷史模型線|模型參考)）", "", total)
+    handicap = re.sub(r"（(?:歷史模型參考|模型參考)）", "", handicap)
+    winner_display = team_zh(winner) if winner else None
     return {"type": "flex", "altText": f"{analysis_label}對戰分析｜{home_display} VS {away_display}"[:400],
             "contents": {"type": "bubble", "size": "kilo",
                 "header": {"type": "box", "layout": "vertical", "backgroundColor": "#0F172A",
