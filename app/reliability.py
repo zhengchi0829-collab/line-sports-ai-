@@ -6,6 +6,8 @@ stored in the data cache. An empty successful feed is NOT a connection failure.
 from __future__ import annotations
 
 import asyncio
+import os
+from .odds import OddsGateway, format_book
 import hashlib
 import logging
 import re
@@ -18,7 +20,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.6.59"
+VERSION = "0.6.60"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -441,12 +443,29 @@ def odds_category_menu() -> dict:
                                       button("🏠 回主選單", MENU, "#334155")]}}}
 
 
+def odds_league_menu(provider: str) -> dict:
+    prefix = "台灣運彩" if provider == "台灣運彩賠率" else "娛樂平台"
+    key = "JBOT_API_TOKEN" if prefix == "台灣運彩" else "THE_ODDS_API_KEY"
+    if not os.getenv(key,"").strip():
+        return odds_source_card(provider)
+    if prefix=="台灣運彩":
+        leagues = ("NBA","MLB","英超","西甲","德甲","義甲","法甲","歐冠","NPB","KBO","CPBL")
+    else:
+        leagues = ("NBA","MLB","英超","西甲","德甲","義甲","法甲","歐冠")
+    return {"type":"flex","altText":provider+"｜選擇聯賽","quickReply":quick_menu(),
+        "contents":{"type":"bubble","size":"kilo",
+            "header":{"type":"box","layout":"vertical","backgroundColor":"#0F172A",
+                "contents":[text("📊 "+provider,"lg","#FFFFFF","bold")]},
+            "body":{"type":"box","layout":"vertical","spacing":"sm",
+                "contents":[button("📈 "+lg,"賠率"+prefix+lg,"#0F766E") for lg in leagues[:12]]}}}
+
+
 def odds_source_card(provider: str) -> dict:
     official = provider == "台灣運彩賠率"
-    desc = ("目前尚未取得可供機器讀取與核實的台灣運彩即時賠率資料。"
+    desc = ("台灣運彩即時盤口需在 Render 設定 JBOT_API_TOKEN；目前尚未完成授權資料接入。"
             "請由官方賽事表查看當下價格；不會顯示猜測值。"
             if official else
-            "尚未指定娛樂平台或接入該平台的合法即時賠率資料源。"
+            "娛樂平台盤口需在 Render 設定 THE_ODDS_API_KEY；目前尚未完成授權資料接入。"
             "不同平台盤口與賠率不同，不能套用其他平台的數據。")
     controls = [button("🔄 重新查詢來源", provider, "#0F766E"),
                 button("↩ 返回賠率分類", "檢視賠率", "#334155")]
@@ -455,7 +474,7 @@ def odds_source_card(provider: str) -> dict:
                             "color": "#2563EB",
                             "action": {"type": "uri", "label": "🔎 官方賠率頁",
                                        "uri": "https://www.sportslottery.com.tw/"}})
-    return {"type": "flex", "altText": provider + "｜暫無可驗證即時賠率",
+    return {"type": "flex", "altText": provider + "｜尚未設定授權賠率 API",
             "quickReply": quick_menu(),
             "contents": {"type": "bubble", "size": "kilo",
                 "header": {"type": "box", "layout": "vertical", "backgroundColor": "#0F172A",
@@ -743,6 +762,7 @@ class Controller:
     def __init__(self, ui, client):
         self.ui = ui
         self.fixtures = Fixtures(client)
+        self.odds = OddsGateway(client)
         self.details: dict[tuple, tuple] = {}
         self.jobs: dict[tuple, asyncio.Task] = {}
 
@@ -985,7 +1005,20 @@ class Controller:
         if compact in ("賽事分析", "檢視賠率"):
             return [odds_category_menu()]
         if compact in ("台灣運彩賠率", "娛樂平台賠率"):
-            return [odds_source_card(compact)]
+            return [odds_league_menu(compact)]
+        match_odds = re.fullmatch(r"賠率(台灣運彩|娛樂平台)(英超|西甲|德甲|義甲|法甲|歐冠|NBA|NCAA|NBL|TPBL|MLB|NPB|KBO|CPBL|MiLB)", compact)
+        if match_odds:
+            source, league_name = match_odds.groups()
+            provider = "tw" if source == "台灣運彩" else "platform"
+            configured = bool(os.getenv("JBOT_API_TOKEN" if provider=="tw" else "THE_ODDS_API_KEY","").strip())
+            if not configured:
+                return [odds_source_card("台灣運彩賠率" if provider=="tw" else "娛樂平台賠率")]
+            now = datetime.now(TZ)
+            data = await self.odds.feed(provider, league_name, now.strftime("%Y-%m-%d"))
+            if not data:
+                return [{"type":"text","text":f"{source}｜{league_name} 今日尚無可核實賠率資料（或資料源暫時無法連線）。","quickReply":quick_menu()}]
+            lines=[format_book(row) for row in data[:4]]
+            return [{"type":"text","text":"\n\n".join(lines)[:4700],"quickReply":quick_menu()}]
         if compact in KEYS:
             key = KEYS[compact]
             return [fixture_cards(key, await self.fixtures.get(key), self.ui.team_zh)]
@@ -1007,9 +1040,61 @@ class Controller:
                 a, b = (p.strip().lstrip(".").strip()[:35] for p in parts)
                 history, players, recommended, metrics = ((None, None, None, None) if demo else
                                                          await self.team_details(base_sport, a, b, league))
+                # Match live market odds to both teams and a verified kickoff;
+                # never substitute the historical model line for a sportsbook line.
+                actual_market = None
+                fixture_key = {"NBA":"basketball","NCAA":"basketball_ncaa","NBL":"basketball_nbl","TPBL":"basketball_tpbl",
+                               "MLB":"baseball","NPB":"baseball_npb","KBO":"baseball_kbo","CPBL":"baseball_cpbl",
+                               "MiLB":"baseball_milb", **{label:key for label,(key,_) in SOCCER_LEAGUES.items()}}.get(league)
+                kickoff = None
+                if fixture_key:
+                    snapshot = self.fixtures.last.get(fixture_key)
+                    if snapshot:
+                        for game in snapshot.games:
+                            def comparable(given, actual):
+                                return re.sub(r"[^\\w]","",str(given)).casefold() == re.sub(r"[^\\w]","",str(actual)).casefold()
+                            if ((comparable(game.home,a) or comparable(self.ui.team_zh(game.home),a))
+                                and (comparable(game.away,b) or comparable(self.ui.team_zh(game.away),b))):
+                                kickoff = game.start
+                                break
+                if not demo and league and kickoff:
+                    for source in ("tw","platform"):
+                        quote = await self.odds.match(source,league,a,b,kickoff,self.ui.team_zh)
+                        if quote:
+                            actual_market = quote
+                            break
                 card = self.ui.offline_analysis(base_sport, a + " vs " + b, history, players,
                                                 league=league, recommended_team=recommended,
                                                 recent_metrics=metrics)
+                if isinstance(card,dict):
+                    panel = card["contents"]["body"]["contents"][-1]
+                    cells = panel.get("contents",[])
+                    if actual_market:
+                        source_title=actual_market["source"]+"｜"+actual_market["book"]
+                        cells[0]["text"]="✦ 真實盤口｜"+source_title
+                        if actual_market.get("home_price") and actual_market.get("away_price"):
+                            cells[1]["text"]=("🏆 獨贏賠率  主 "+f"{actual_market['home_price']:.2f}"+
+                                              "／客 "+f"{actual_market['away_price']:.2f}"+
+                                              (("／和 "+f"{actual_market['draw_price']:.2f}") if actual_market.get("draw_price") else ""))
+                        if actual_market.get("total") is not None:
+                            line=actual_market["total"]
+                            projected=(metrics or {}).get("expected_total")
+                            direction=("偏大" if projected>line+0.2 else "偏小" if projected<line-0.2 else "接近盤口") if projected is not None else "模型資料不足"
+                            cells[3]["text"]=f"📊 大小盤 {line:g}｜"+direction
+                        else:
+                            cells[3]["text"]="📊 大小盤  此來源未提供"
+                        if actual_market.get("spread") is not None:
+                            line=actual_market["spread"]
+                            projected=(metrics or {}).get("expected_margin")
+                            direction=("偏主隊" if projected+line>0.3 else "偏客隊" if projected+line< -0.3 else "接近盤口") if projected is not None else "模型資料不足"
+                            cells[5]["text"]=f"⚖️ 讓球 主隊 {line:+g}｜"+direction
+                        else:
+                            cells[5]["text"]="⚖️ 讓球  此來源未提供"
+                        cells.append(text("盤口更新："+str(actual_market.get("updated") or "未提供")[:19],"xs","#CBD5E1"))
+                    else:
+                        cells[0]["text"]="✦ 歷史模型參考｜無已核實盤口"
+                        cells[3]["text"]="📊 大小分 "+((metrics or {}).get("total") or "未取得實際盤口")
+                        cells[5]["text"]="⚖️ 讓球 "+((metrics or {}).get("handicap") or "未取得實際盤口")
                 if isinstance(card, dict):
                     if league:
                         card["contents"]["header"]["contents"][-1]["text"] = f"{league} · 對戰情境分析"
