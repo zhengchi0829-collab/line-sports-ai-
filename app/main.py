@@ -110,6 +110,55 @@ async def startup_probe(app):
         log.error("startup_probe failed=%s", type(exc).__name__)
 
 
+async def verify_line_webhook(app):
+    """Inspect LINE webhook configuration and repair a stale endpoint if possible."""
+    token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "").strip()
+    if not token:
+        log.warning("line_webhook_check unavailable=missing_access_token")
+        app.state.webhook_check = {"status": "missing_token"}
+        return
+    url = "https://api.line.me/v2/bot/channel/webhook/endpoint"
+    expected = os.getenv("LINE_WEBHOOK_URL", "").strip() or (
+        "https://line-sports-ai-bot.onrender.com/webhooks/line")
+    headers = {"Authorization": "Bearer " + token}
+    try:
+        response = await app.state.line_client.get(url, headers=headers)
+        if response.status_code != 200:
+            log.warning("line_webhook_check status=%s", response.status_code)
+            app.state.webhook_check = {"status": "api_error", "http": response.status_code}
+            return
+        details = response.json()
+        existing = str(details.get("endpoint") or "")
+        active = details.get("active") is True
+        changed = False
+        if existing.rstrip("/") != expected.rstrip("/"):
+            update = await app.state.line_client.put(
+                url, headers=headers, json={"endpoint": expected})
+            changed = update.status_code == 200
+            log.warning("line_webhook_endpoint_mismatch repair_status=%s",
+                        update.status_code)
+            if not changed:
+                app.state.webhook_check = {"status": "repair_failed", "http": update.status_code,
+                                           "active": active}
+                return
+        test = await app.state.line_client.post(
+            "https://api.line.me/v2/bot/channel/webhook/test",
+            headers=headers, json={"endpoint": expected})
+        test_ok = test.status_code == 200 and bool(
+            test.json().get("success", False))
+        app.state.webhook_check = {
+            "status": "ready" if active and test_ok else
+                      "inactive" if not active else "test_failed",
+            "active": active, "endpoint_matches": True,
+            "fixed_endpoint": changed, "test_success": test_ok,
+        }
+        log.warning("line_webhook_check active=%s endpoint_matches=%s updated=%s test=%s",
+                    active, True, changed, test_ok)
+    except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
+        app.state.webhook_check = {"status": "exception", "error": type(exc).__name__}
+        log.warning("line_webhook_check exception=%s", type(exc).__name__)
+
+
 async def dated_flow_probe(app):
     """Smoke-test the complete dated fixture -> LINE button -> model flow (no user messages)."""
     await asyncio.sleep(15)
@@ -297,6 +346,7 @@ async def lifespan(app):
     app.state.background_refresh_counts = {}
     app.state.soccer_validation_done = False
     app.state.date_probe_status = {}
+    app.state.webhook_check = {"status": "checking"}
     async with httpx.AsyncClient(timeout=httpx.Timeout(3.5, connect=2), follow_redirects=True,
                                  limits=httpx.Limits(max_connections=12)) as source_client, \
                httpx.AsyncClient(timeout=httpx.Timeout(5, connect=2)) as line_client:
@@ -305,16 +355,18 @@ async def lifespan(app):
         probe = asyncio.create_task(startup_probe(app))
         refresher = asyncio.create_task(continuous_refresh(app))
         dated_probe = asyncio.create_task(dated_flow_probe(app))
+        webhook_probe = asyncio.create_task(verify_line_webhook(app))
         yield
         probe.cancel()
         refresher.cancel()
         dated_probe.cancel()
+        webhook_probe.cancel()
         active = list(app.state.pending)
         if active:
             done, unfinished = await asyncio.wait(active, timeout=4)
             for task in unfinished:
                 task.cancel()
-        await asyncio.gather(probe, refresher, dated_probe,
+        await asyncio.gather(probe, refresher, dated_probe, webhook_probe,
                              *active, return_exceptions=True)
         await app.state.controller.close()
     # Keep the existing LINE default rich menu. Recreating it on every deploy
@@ -345,7 +397,8 @@ async def feature_health():
                 "counts": app.state.background_refresh_counts,
             },
             "pending_events": len(app.state.pending),
-            "dated_analysis_probe": app.state.date_probe_status}
+            "dated_analysis_probe": app.state.date_probe_status,
+            "line_webhook": app.state.webhook_check}
 
 
 async def _push_fallback(event, app, token: str, text_value: str) -> bool:
