@@ -340,12 +340,21 @@ async def verified_baseball_analysis(client, league, home, away, translate=None,
             params = {"teamId": team["id"], "startDate": start, "endDate": end}
             if sid is not None:
                 params["sportId"] = sid
-            resp=await client.get(base + "/schedule",params=params,timeout=4)
+            resp=await client.get(base + "/schedule",params=params,
+                                  timeout=7 if league == "MiLB" else 4)
             resp.raise_for_status()
             return finished_matches(resp.json(), team["id"])
         games = await asyncio.gather(*(schedule(t) for t in matches),return_exceptions=True)
         if any(isinstance(g,BaseException) for g in games):
-            logger.warning("baseball_form_schedule_unavailable league=%s",league)
+            issues = []
+            for index, result in enumerate(games):
+                if isinstance(result, BaseException):
+                    response = getattr(result, "response", None)
+                    status = getattr(response, "status_code", None)
+                    issues.append((type(result).__name__, status,
+                                   matches[index][0]["id"], matches[index][1]))
+            logger.warning("baseball_form_schedule_unavailable league=%s issues=%s",
+                           league, issues)
             return UNAVAILABLE
         if any(len(g)<5 for g in games):
             return UNAVAILABLE
