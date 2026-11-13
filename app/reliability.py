@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.6.58"
+VERSION = "0.6.59"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -864,16 +864,8 @@ class Controller:
                     chosen_index = 0 if rates[0] > rates[1] else 1
                 chosen = (a, b)[chosen_index]
                 wins, draws, losses, n = records[chosen_index]
-                lines = []
-                for date_str, outcome, scored, conceded in historical_games[chosen_index]:
-                    date = str(date_str)[:10]
-                    result = {"W": "勝", "D": "和", "L": "敗"}.get(outcome, "?")
-                    score_text = (f" {scored:g}-{conceded:g}"
-                                  if scored is not None and conceded is not None else "")
-                    lines.append(f"{date} {result}{score_text}")
                 history = (f"{chosen}｜歷史最近五場：{wins}勝、{draws}和、{losses}敗"
-                           f"｜勝率 {wins / 5 * 100:.1f}%\n" + "\n".join(lines))
-                history += "\n此為歷史勝率，非下一場勝率。"
+                           f"｜勝率 {wins / 5 * 100:.1f}%")
                 metrics = None
                 if len(scores[0]) == 5 and len(scores[1]) == 5:
                     # Team-specific expected scoring from each team's last five scored
