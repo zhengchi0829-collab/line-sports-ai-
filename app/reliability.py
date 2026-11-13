@@ -888,11 +888,20 @@ def fixture_cards(sport: str, snapshot: Snapshot, team_name, today=False, now=No
 
 
 class Controller:
-    async def category_fixtures(self, mode: str, category: str) -> dict:
+    async def category_fixtures(self, mode: str, category: str,
+                                selected: date | None = None,
+                                league: str | None = None) -> dict:
         now = datetime.now(TZ)
-        keys = CATEGORY_SOURCES[category]
-        results = await asyncio.gather(
-            *(self.fixtures.get(key) for key in keys), return_exceptions=True)
+        requested = selected or (now.date() if mode == TODAY else None)
+        keys = (KEYS[league],) if league else CATEGORY_SOURCES[category]
+        if requested is not None:
+            results = await asyncio.gather(
+                *(self.fixtures.on_date(key, requested) for key in keys),
+                return_exceptions=True)
+        else:
+            results = await asyncio.gather(
+                *(self.fixtures.get(key) for key in keys),
+                return_exceptions=True)
         options = []
         had_error = False
         for key, result in zip(keys, results):
@@ -901,8 +910,8 @@ class Controller:
                 continue
             had_error = had_error or bool(result.errors)
             for game in result.games:
-                if ((mode == TODAY and game.start.date() == now.date()) or
-                    (mode == FUTURE and game.start.date() > now.date())):
+                if ((requested is not None and game.start.date() == requested) or
+                    (requested is None and mode == FUTURE and game.start.date() > now.date())):
                     options.append((game, key, result))
         options.sort(key=lambda item: (item[0].start, item[1], item[0].ident))
         bubbles = []
@@ -912,18 +921,19 @@ class Controller:
             if unique in used:
                 continue
             used.add(unique)
-            selected = Snapshot([game], snap.fetched, snap.errors, snap.successes, snap.stale)
-            result = fixture_cards(key, selected, self.ui.team_zh, today=(mode == TODAY), now=now)
+            single = Snapshot([game], snap.fetched, snap.errors, snap.successes, snap.stale)
+            result = fixture_cards(key, single, self.ui.team_zh,
+                                   on_date=requested, now=now)
             bubbles.extend(result["contents"].get("contents", []))
             if len(bubbles) >= 8:
                 break
+        caption = f"{requested}｜{league or category}" if requested else f"{mode}｜{league or category}"
         if not bubbles:
-            text_value = (("當日無其他" + category + "賽事") if mode == TODAY
-                          else ("目前無未來" + category + "賽事"))
+            info = caption + " 沒有查到該日實際賽事。"
             if had_error:
-                text_value += "\n部分賽程資料來源暫時無法連線，請稍後再試。"
-            return {"type": "text", "text": text_value, "quickReply": quick_menu()}
-        return {"type": "flex", "altText": mode + "｜" + category + "｜選擇立即分析",
+                info += "\n部分賽程資料來源未回應，無法確認賽程是否完整。"
+            return {"type": "text", "text": info, "quickReply": quick_menu()}
+        return {"type": "flex", "altText": caption + "｜點選實際賽事進行分析",
                 "quickReply": quick_menu(),
                 "contents": {"type": "carousel", "contents": bubbles}}
 
@@ -1229,11 +1239,41 @@ class Controller:
             return [league_menu()]
         if compact == "棒球":
             return [baseball_menu()]
-        if compact in (TODAY, FUTURE):
+        if compact in (TODAY, FUTURE, SPECIFIED):
             return [date_category_menu(compact)]
-        for period in (TODAY, FUTURE):
-            if compact.startswith(period) and compact[len(period):] in CATEGORY_SOURCES:
-                return [await self.category_fixtures(period, compact[len(period):])]
+        specific = re.fullmatch(
+            rf"{re.escape(SPECIFIED)}(\\d{{4}}-\\d{{2}}-\\d{{2}})(.*)", compact)
+        if specific:
+            date_text, suffix = specific.groups()
+            try:
+                requested = date.fromisoformat(date_text)
+            except ValueError:
+                return [{"type": "text", "text": "日期格式不正確，請用 YYYY-MM-DD。",
+                         "quickReply": quick_menu()}]
+            if not (datetime.now(TZ).date() - timedelta(days=365) <= requested <=
+                    datetime.now(TZ).date() + timedelta(days=365)):
+                return [{"type": "text", "text": "請選擇過去一年至未來一年內的日期。",
+                         "quickReply": quick_menu()}]
+            if not suffix:
+                return [date_category_menu(SPECIFIED, requested)]
+            if suffix in CATEGORY_SOURCES:
+                return [date_league_menu(SPECIFIED, suffix, requested)]
+            if suffix in LEAGUE_CATEGORIES["足球"] + LEAGUE_CATEGORIES["籃球"] + LEAGUE_CATEGORIES["棒球"]:
+                return [await self.category_fixtures(
+                    SPECIFIED, ("足球" if suffix in LEAGUE_CATEGORIES["足球"] else
+                                "籃球" if suffix in LEAGUE_CATEGORIES["籃球"] else "棒球"),
+                    selected=requested, league=suffix)]
+        if compact.startswith(TODAY):
+            suffix = compact[len(TODAY):]
+            if suffix in CATEGORY_SOURCES:
+                return [date_league_menu(TODAY, suffix, datetime.now(TZ).date())]
+            if suffix in LEAGUE_CATEGORIES["足球"] + LEAGUE_CATEGORIES["籃球"] + LEAGUE_CATEGORIES["棒球"]:
+                return [await self.category_fixtures(
+                    TODAY, ("足球" if suffix in LEAGUE_CATEGORIES["足球"] else
+                            "籃球" if suffix in LEAGUE_CATEGORIES["籃球"] else "棒球"),
+                    selected=datetime.now(TZ).date(), league=suffix)]
+        if compact.startswith(FUTURE) and compact[len(FUTURE):] in CATEGORY_SOURCES:
+            return [await self.category_fixtures(FUTURE, compact[len(FUTURE):])]
         if compact in ("賽事分析", "檢視賠率"):
             return [odds_category_menu()]
         if compact in ("台灣運彩賠率", "娛樂平台賠率"):
