@@ -286,7 +286,7 @@ async def verified_asian_baseball_analysis(client, league, home, away, translate
         return UNAVAILABLE
 
 
-async def verified_baseball_analysis(client, league, home, away, translate=None, team_ids=None):
+async def verified_baseball_analysis(client, league, home, away, translate=None, team_ids=None, sport_id=None):
     """Return (form, roster, winner, metrics) with no fake observed statistics."""
     if league == "CPBL":
         return await verified_cpbl_analysis(client,home,away,translate)
@@ -309,7 +309,8 @@ async def verified_baseball_analysis(client, league, home, away, translate=None,
             return [(team, sid) for team in response.json().get("teams", [])]
         matches = []
         if direct_ids:
-            matches = [({"id": int(tid)}, None) for tid in direct_ids]
+            level = int(sport_id) if sport_id in sport_ids else None
+            matches = [({"id": int(tid)}, level) for tid in direct_ids]
         else:
             team_responses = await asyncio.gather(
                 *(load_teams(sid) for sid in sport_ids), return_exceptions=True)
