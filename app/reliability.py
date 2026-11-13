@@ -22,7 +22,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.6.72"
+VERSION = "0.6.73"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -821,12 +821,12 @@ class Controller:
                 # reliable than a generic team search when the next season is scheduled.
                 snapshot = self.fixtures.last.get("baseball_milb")
                 def norm_team(value):
-                    return re.sub(r"[^\\w]", "", str(value)).casefold()
+                    return re.sub(r"[^\w]", "", str(value)).casefold()
                 if snapshot:
                     for game in snapshot.games:
                         if (norm_team(a) in (norm_team(game.home), norm_team(self.ui.team_zh(game.home)))
                             and norm_team(b) in (norm_team(game.away), norm_team(self.ui.team_zh(game.away)))):
-                            home_id = re.search(r"/(\\d+)\\.svg$", game.home_logo)
+                            home_id = re.search(r"/(\d+)\.svg$", game.home_logo)
                             away_id = re.search(r"/(\\d+)\\.svg$", game.away_logo)
                             if home_id and away_id:
                                 team_ids = (home_id.group(1), away_id.group(1))
