@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.6.54"
+VERSION = "0.6.55"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -797,6 +797,7 @@ class Controller:
                     return_exceptions=True)
                 records = []
                 scores = []
+                historical_games = []
                 for ident, response in zip(ids, responses):
                     played = []
                     if isinstance(response, httpx.Response) and response.status_code == 200:
@@ -832,7 +833,9 @@ class Controller:
                                 other_score = real_score(opponent.get("score")) if opponent else None
                                 played.append((event.get("date") or "", outcome, mine_score, other_score))
                     played.sort(reverse=True)
+                    # Only the last five completed games, newest first.
                     recent_games = played[:5]
+                    historical_games.append(recent_games)
                     recent = [outcome for _, outcome, _, _ in recent_games]
                     wins = recent.count("W")
                     draws = recent.count("D")
@@ -841,38 +844,70 @@ class Controller:
                     scores.append([(for_score, against_score)
                                    for _, _, for_score, against_score in recent_games
                                    if for_score is not None and against_score is not None])
-                # Compare both teams internally but display only the recommended team's form.
-                # No fabricated prediction probability. Ties count as played (not wins).
-                eligible = [(rec[0] / rec[3], rec[3], idx)
-                            for idx, rec in enumerate(records) if rec[3] >= 3]
-                chosen = None
-                chosen_index = None
-                if len(eligible) == 2 and eligible[0][0] != eligible[1][0]:
-                    chosen_index = max(eligible)[2]
-                    chosen = (a, b)[chosen_index]
-                if chosen_index is None:
-                    return ("近五場資料不足或雙方勝率相同，暫不推薦隊伍；不顯示虛構勝率。",
-                            "尚未有可核實的推薦隊伍主力球員資訊。", None, None)
+                # A real five-game form sample, not a random pick or betting probability.
+                # Both clubs require five verified finished games before a comparison.
+                if any(rec[3] != 5 for rec in records):
+                    return ("雙方歷史最近五場資料不完整，暫無可驗證的五場勝率。",
+                            "球員資料待核實；不根據不足樣本推薦。", None, None)
+                rates = [rec[0] / 5 for rec in records]
+                margins_avg = [
+                    sum(x - y for x, y in values) / len(values) if values else None
+                    for values in scores
+                ]
+                # Compare wins first, then net scores as a transparent tie-break.
+                if rates[0] == rates[1]:
+                    if any(val is None for val in margins_avg) or margins_avg[0] == margins_avg[1]:
+                        return ("兩隊歷史五場勝率相同，且分差不足以區分；暫不推薦。",
+                                "球員資料待核實。", None, None)
+                    chosen_index = 0 if margins_avg[0] > margins_avg[1] else 1
+                else:
+                    chosen_index = 0 if rates[0] > rates[1] else 1
+                chosen = (a, b)[chosen_index]
                 wins, draws, losses, n = records[chosen_index]
-                history = (f"{chosen}｜近{n}場：{wins}勝、{draws}和、{losses}敗"
-                           f"｜實際勝率 {wins / n * 100:.1f}%"
-                           "\\n勝率是已完賽勝場比例，不是下一場的預測勝率。")
-                # Data-derived reference figures, NOT sportsbook prices or a betting edge.
+                lines = []
+                for date_str, outcome, scored, conceded in historical_games[chosen_index]:
+                    date = str(date_str)[:10]
+                    result = {"W": "勝", "D": "和", "L": "敗"}.get(outcome, "?")
+                    score_text = (f" {scored:g}-{conceded:g}"
+                                  if scored is not None and conceded is not None else "")
+                    lines.append(f"{date} {result}{score_text}")
+                history = (f"{chosen}｜歷史最近五場：{wins}勝、{draws}和、{losses}敗"
+                           f"｜勝率 {wins / 5 * 100:.1f}%\\n" + "\\n".join(lines))
+                history += "\\n此為歷史勝率，非下一場勝率。"
                 metrics = None
-                if len(scores[0]) >= 3 and len(scores[1]) >= 3:
-                    totals = [sum(pair) for group in scores for pair in group]
-                    margins = [[x - y for x, y in group] for group in scores]
-                    total_avg = sum(totals) / len(totals)
-                    home_margin = sum(margins[0]) / len(margins[0])
-                    away_margin = sum(margins[1]) / len(margins[1])
-                    advantage = (home_margin - away_margin) / 2
+                if len(scores[0]) == 5 and len(scores[1]) == 5:
+                    # Team-specific expected scoring from each team's last five scored
+                    # and conceded points/goals. A simple form estimator, not market odds.
+                    avg_for = [sum(x for x, _ in group) / 5 for group in scores]
+                    avg_against = [sum(y for _, y in group) / 5 for group in scores]
+                    expected_home = (avg_for[0] + avg_against[1]) / 2
+                    expected_away = (avg_for[1] + avg_against[0]) / 2
+                    expected_total = expected_home + expected_away
+                    expected_margin = expected_home - expected_away
+                    historical_totals = [x + y for group in scores for x, y in group]
+                    historical_mean = sum(historical_totals) / len(historical_totals)
+                    # Internal reference threshold derived from history, not an offered line.
+                    reference = (round(historical_mean * 2) / 2)
+                    total_direction = ("大" if expected_total > reference + 0.2 else
+                                       ("小" if expected_total < reference - 0.2 else "接近參考線"))
+                    unit = "球" if sport == "足球" else "分"
+                    total_text = (f"{total_direction} {reference:g} {unit}（歷史模型參考線）"
+                                  f"｜預估合計 {expected_total:.1f} {unit}")
                     if sport == "足球":
-                        totals_text = f"近五場平均總進球 {total_avg:.2f} 球｜非盤口"
-                        margin_text = f"近況平均淨勝球差參考 {advantage:+.2f} 球｜非讓球盤"
+                        handicap_line = 0.5
+                    elif sport == "棒球":
+                        handicap_line = 1.5
                     else:
-                        totals_text = f"近五場平均總分 {total_avg:.1f} 分｜非盤口"
-                        margin_text = f"近況平均分差參考 {advantage:+.1f} 分｜非讓分盤"
-                    metrics = {"total": totals_text, "handicap": margin_text}
+                        handicap_line = max(0.5, round(abs(expected_margin) * 2) / 2 - 0.5)
+                    # Choose a side only if projected difference exceeds the internal line.
+                    favored_index = 0 if expected_margin > 0 else 1
+                    favored = (a, b)[favored_index]
+                    projected = abs(expected_margin)
+                    if projected > handicap_line + (0.1 if sport == "足球" else 0.3):
+                        handicap_text = f"{favored} -{handicap_line:g} {unit}（模型參考）"
+                    else:
+                        handicap_text = f"讓分差距不足｜參考 {favored} -{handicap_line:g} {unit}"
+                    metrics = {"total": total_text, "handicap": handicap_text}
                 selected_id = ids[0 if chosen == a else 1]
                 roster_response, leaders_response = await asyncio.gather(
                     self.fixtures.client.get(base + "/teams/" + selected_id + "/roster"),

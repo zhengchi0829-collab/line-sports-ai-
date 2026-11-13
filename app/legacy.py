@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 
-app = FastAPI(title="體育AI分析系統", version="0.6.54")
+app = FastAPI(title="體育AI分析系統", version="0.6.55")
 log = logging.getLogger("sports_bot")
 TZ = ZoneInfo("Asia/Taipei")
 MENU = ("歡迎使用【體育AI分析系統】！\n\n"
@@ -361,8 +361,8 @@ def offline_analysis(sport, matchup=None, team_history=None, star_players=None, 
         result = "關鍵球員：雙方先發投手、中心打者。\n看點：三振保送比與得點圈打擊。"
     # No hash-generated fake betting recommendations.
     winner = recommended_team if recommended_team in (home, away) else None
-    total = (recent_metrics or {}).get("total") or "近期實際比分不足，暫無大小分參考"
-    handicap = (recent_metrics or {}).get("handicap") or "近期實際比分不足，暫無讓球參考"
+    total = (recent_metrics or {}).get("total") or "歷史五場比分不足，暫無大小分模型分析"
+    handicap = (recent_metrics or {}).get("handicap") or "歷史五場比分不足，暫無讓球模型分析"
     # Always show both sections. Distinguish verified facts from scouting criteria.
     if team_history:
         focus = team_history
@@ -399,12 +399,12 @@ def offline_analysis(sport, matchup=None, team_history=None, star_players=None, 
                         txt(f"{analysis_label} · 對戰情境分析", "xs", "#CBD5E1")]},
                 "body": {"type": "box", "layout": "vertical", "backgroundColor": "#FFFFFF",
                     "paddingAll": "12px", "spacing": "sm", "contents": [
-                        panel("📊 推薦隊伍｜近五場實際勝率", focus),
+                        panel("📊 推薦隊伍｜歷史五場戰績勝率", focus),
                         panel("⭐ 推薦隊伍｜球員資訊", result),
                         {"type": "box", "layout": "vertical", "backgroundColor": "#0F172A",
                          "cornerRadius": "12px", "paddingAll": "13px", "spacing": "sm",
                          "contents": [
-                             txt("✦ 近期數據參考（非真實盤口）", "md", "#FDE68A", "bold"),
+                             txt("✦ 歷史五場模型分析（非盤口）", "md", "#FDE68A", "bold"),
                              txt(f"🏆 獨贏  {winner or '資料不足，暫無推薦'}", "md", "#FFFFFF", "bold"),
                              {"type": "separator", "color": "#475569"},
                              txt(f"📊 大小分  {total}", "md", "#FFFFFF", "bold"),
