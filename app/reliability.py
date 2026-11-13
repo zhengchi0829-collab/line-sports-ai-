@@ -22,7 +22,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.6.74"
+VERSION = "0.6.75"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -148,6 +148,12 @@ def parse_feed(kind: str, data: Any) -> list[Game]:
                         for w in ("cancel", "postpon")):
                     continue
                 h, a = g["teams"]["home"]["team"], g["teams"]["away"]["team"]
+                if kind == "milb":
+                    # The MiLB schedule feed may contain MLB exhibition opponents.
+                    # All MLB franchise IDs are within 100-199; exclude cross-league games.
+                    home_id, away_id = int(h["id"]), int(a["id"])
+                    if 100 <= home_id < 200 or 100 <= away_id < 200:
+                        continue
                 league_name = {"mlb": "MLB", "npb": "NPB", "kbo": "KBO", "milb": "MiLB",
                                "npb_archive": "NPB", "kbo_archive": "KBO"}[kind]
                 item = Game(str(g["gamePk"]), "baseball", league_name, instant(g["gameDate"]), h["name"], a["name"],
