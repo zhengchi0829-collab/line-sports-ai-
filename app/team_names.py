@@ -306,7 +306,7 @@ BASEBALL_ZH = {
     "Bowie Baysox": "鮑伊灣襪",
     "Somerset Patriots": "薩默塞特愛國者",
     "New Hampshire Fisher Cats": "新罕布夏漁貓",
-    "Hartford Yard Goats": "哈特福院羊",
+    "Hartford Yard Goats": "哈特福德庭院山羊",
     "Binghamton Rumble Ponies": "賓漢頓隆隆小馬",
     "Erie SeaWolves": "伊利海狼",
     "Akron RubberDucks": "阿克倫橡皮鴨",
@@ -624,7 +624,10 @@ Wofford Terriers = 沃福德梗犬
 Wright State Raiders = 萊特州立突擊者
 Wyoming Cowboys = 懷俄明牛仔
 Yale Bulldogs = 耶魯鬥牛犬
-Youngstown State Penguins = 揚斯敦州立企鵝""".splitlines()
+Youngstown State Penguins = 揚斯敦州立企鵝
+Frederick Keys = 弗雷德里克鑰匙
+Greenville Drive = 格林維爾衝勁
+Hub City Spartanburgers = 哈布城斯帕坦堡漢堡""".splitlines()
     if " = " in line
 )
 
