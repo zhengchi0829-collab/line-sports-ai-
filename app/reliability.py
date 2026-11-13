@@ -22,7 +22,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.6.69"
+VERSION = "0.6.70"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -139,9 +139,13 @@ def parse_feed(kind: str, data: Any) -> list[Game]:
                             "live" if status == 2 else "scheduled", not bool(g.get("isTimeTBD")))
             elif kind in ("mlb", "npb", "kbo", "milb", "npb_archive", "kbo_archive"):
                 status = g.get("status", {})
-                state = status.get("abstractGameState")
-                if state not in ("Preview", "Live") or any(w in status.get("detailedState", "").lower()
-                                                           for w in ("cancel", "postpon")):
+                state = str(status.get("abstractGameState", ""))
+                # Public NPB/KBO archives use P/F/L; MLB Stats uses Preview/Final/Live.
+                is_preview = state in ("Preview", "P", "Scheduled")
+                is_live = state in ("Live", "L", "In Progress")
+                if not (is_preview or is_live) or any(
+                        w in str(status.get("detailedState", "")).lower()
+                        for w in ("cancel", "postpon")):
                     continue
                 h, a = g["teams"]["home"]["team"], g["teams"]["away"]["team"]
                 league_name = {"mlb": "MLB", "npb": "NPB", "kbo": "KBO", "milb": "MiLB",
@@ -150,7 +154,7 @@ def parse_feed(kind: str, data: Any) -> list[Game]:
                             ("" if kind.endswith("_archive") else f"https://www.mlbstatic.com/team-logos/{h['id']}.svg"),
                             ("" if kind.endswith("_archive") else f"https://www.mlbstatic.com/team-logos/{a['id']}.svg"),
                             ("Public league score archive" if kind.endswith("_archive") else "MLB Stats API"),
-                            "live" if state == "Live" else "scheduled", not status.get("startTimeTBD", False))
+                            "live" if is_live else "scheduled", not status.get("startTimeTBD", False))
             elif kind == "cpbl":
                 if str(g.get("status", "")).lower() in ("final", "postponed", "cancelled", "canceled"):
                     continue
