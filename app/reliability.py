@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.6.50"
+VERSION = "0.6.51"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -767,7 +767,7 @@ class Controller:
         import re as regex
         base = "https://site.api.espn.com/apis/site/v2/sports/" + path
         def norm(value):
-            return regex.sub(r"[^\\w]", "", str(value)).casefold()
+            return regex.sub(r"[^\w]", "", str(value)).casefold()
         def score_team(team, requested):
             names = [team.get(k, "") for k in ("displayName", "name", "shortDisplayName", "abbreviation")]
             names.extend(self.ui.team_zh(n) for n in list(names))
@@ -839,8 +839,8 @@ class Controller:
                 chosen = None
                 if len(eligible) == 2 and eligible[0][0] != eligible[1][0]:
                     chosen = (a, b)[max(eligible)[2]]
-                history = "【" + (league or sport) + "｜真實近況】\\n" + "\\n".join(form)
-                history += "\\n勝率指近五場完賽勝場比例，不是本場預測勝率。"
+                history = "【" + (league or sport) + "｜真實近況】\n" + "\n".join(form)
+                history += "\n勝率指近五場完賽勝場比例，不是本場預測勝率。"
                 if not chosen:
                     return (history, "雙方近況無足夠差異或樣本不足，暫無可靠推薦主力名單。", None)
                 selected_id = ids[0 if chosen == a else 1]
