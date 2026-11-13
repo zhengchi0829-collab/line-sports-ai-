@@ -462,6 +462,21 @@ TEAM_ZH = {
     "Seattle Mariners": "西雅圖水手", "St. Louis Cardinals": "聖路易紅雀",
     "Tampa Bay Rays": "坦帕灣光芒", "Texas Rangers": "德州遊騎兵",
     "Toronto Blue Jays": "多倫多藍鳥", "Washington Nationals": "華盛頓國民",
+    # NPB 2026 team translations used by the league-specific score archive.
+    "Yomiuri Giants": "讀賣巨人", "Hanshin Tigers": "阪神虎",
+    "Yokohama DeNA BayStars": "橫濱DeNA灣星",
+    "Tokyo Yakult Swallows": "東京養樂多燕子",
+    "Hiroshima Toyo Carp": "廣島東洋鯉魚", "Chunichi Dragons": "中日龍",
+    "Fukuoka SoftBank Hawks": "福岡軟銀鷹",
+    "Hokkaido Nippon-Ham Fighters": "北海道日本火腿鬥士",
+    "Orix Buffaloes": "歐力士猛牛", "Tohoku Rakuten Golden Eagles": "東北樂天金鷲",
+    "Saitama Seibu Lions": "埼玉西武獅", "Chiba Lotte Marines": "千葉羅德海洋",
+    # KBO 2026 team translations.
+    "KIA Tigers": "起亞虎", "KT Wiz": "KT巫師",
+    "LG Twins": "LG雙子", "Doosan Bears": "斗山熊",
+    "Samsung Lions": "三星獅", "Lotte Giants": "樂天巨人",
+    "Hanwha Eagles": "韓華鷹", "Kiwoom Heroes": "培證英雄",
+    "NC Dinos": "NC恐龍", "SSG Landers": "SSG登陸者",
 }
 
 def team_zh(name):
