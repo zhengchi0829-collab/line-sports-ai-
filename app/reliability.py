@@ -23,7 +23,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.7.1"
+VERSION = "0.7.2"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -987,7 +987,7 @@ def holographic_theme(message: dict) -> dict:
                 if isinstance(box, dict):
                     box["backgroundColor"] = (HUD_HEADER if section == "header"
                                               else HUD_BG)
-            if isinstance(node.get("header"), dict):
+            if isinstance(node.get("header"), dict) and "對戰分析" not in message.get("altText", ""):
                 header = node["header"]
                 texts = header.get("contents")
                 if isinstance(texts, list) and texts and len(texts) < 9:
