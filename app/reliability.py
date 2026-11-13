@@ -15,7 +15,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import quote, urljoin
 from zoneinfo import ZoneInfo
@@ -46,6 +46,7 @@ DEMO_PAIRS = {
 MENU = "\u9078\u55ae"
 TODAY = "\u4eca\u65e5\u8cfd\u4e8b"
 FUTURE = "\u672a\u4f86\u8cfd\u4e8b"
+SPECIFIED = "指定日期賽事"
 log = logging.getLogger("sports_bot")
 
 
@@ -69,7 +70,7 @@ class Game:
     time_known: bool = True
 
 
-def parse_feed(kind: str, data: Any) -> list[Game]:
+def parse_feed(kind: str, data: Any, include_final: bool = False) -> list[Game]:
     """Normalize providers; a malformed game cannot discard the other games."""
     if kind == "openliga":
         if not isinstance(data, list):
@@ -114,17 +115,18 @@ def parse_feed(kind: str, data: Any) -> list[Game]:
     for g in rows:
         try:
             if kind == "openliga":
-                if g.get("matchIsFinished"):
+                if g.get("matchIsFinished") and not include_final:
                     continue
                 raw = g.get("matchDateTimeUTC")
                 dt = instant(raw) if raw else instant(g["matchDateTime"], ZoneInfo("Europe/Berlin"))
                 h, a = g["team1"], g["team2"]
                 item = Game(str(g["matchID"]), "soccer", "\u5fb7\u7532", dt,
                             h["teamName"], a["teamName"], h.get("teamIconUrl", ""),
-                            a.get("teamIconUrl", ""), "OpenLigaDB")
+                            a.get("teamIconUrl", ""), "OpenLigaDB",
+                            "final" if g.get("matchIsFinished") else "scheduled")
             elif kind.startswith("nba"):
                 status = int(g.get("gameStatus", 1))
-                if status not in (1, 2):
+                if status not in ((1, 2, 3) if include_final else (1, 2)):
                     continue
                 h, a = g["homeTeam"], g["awayTeam"]
                 raw = g.get("gameDateTimeUTC") or g.get("gameTimeUTC")
@@ -136,14 +138,16 @@ def parse_feed(kind: str, data: Any) -> list[Game]:
                     return f"https://cdn.nba.com/logos/nba/{t['teamId']}/primary/L/logo.svg" if t.get("teamId") else ""
                 item = Game(str(g["gameId"]), "basketball", "NBA", instant(raw), nba_name(h),
                             nba_name(a), nba_logo(h), nba_logo(a), "NBA",
-                            "live" if status == 2 else "scheduled", not bool(g.get("isTimeTBD")))
+                            "final" if status == 3 else ("live" if status == 2 else "scheduled"),
+                            not bool(g.get("isTimeTBD")))
             elif kind in ("mlb", "npb", "kbo", "milb", "npb_archive", "kbo_archive"):
                 status = g.get("status", {})
                 state = str(status.get("abstractGameState", ""))
                 # Public NPB/KBO archives use P/F/L; MLB Stats uses Preview/Final/Live.
                 is_preview = state in ("Preview", "P", "Scheduled")
                 is_live = state in ("Live", "L", "In Progress")
-                if not (is_preview or is_live) or any(
+                is_final = state in ("Final", "F") or str(status.get("detailedState", "")).lower().startswith("final")
+                if not (is_preview or is_live or (include_final and is_final)) or any(
                         w in str(status.get("detailedState", "")).lower()
                         for w in ("cancel", "postpon")):
                     continue
@@ -160,9 +164,12 @@ def parse_feed(kind: str, data: Any) -> list[Game]:
                             ("" if kind.endswith("_archive") else f"https://www.mlbstatic.com/team-logos/{h['id']}.svg"),
                             ("" if kind.endswith("_archive") else f"https://www.mlbstatic.com/team-logos/{a['id']}.svg"),
                             ("Public league score archive" if kind.endswith("_archive") else "MLB Stats API"),
-                            "live" if is_live else "scheduled", not status.get("startTimeTBD", False))
+                            "final" if is_final else ("live" if is_live else "scheduled"),
+                            not status.get("startTimeTBD", False))
             elif kind == "cpbl":
-                if str(g.get("status", "")).lower() in ("final", "postponed", "cancelled", "canceled"):
+                cpbl_status = str(g.get("status", "")).lower()
+                if cpbl_status in ("postponed", "cancelled", "canceled") or (
+                        cpbl_status in ("final", "finished") and not include_final):
                     continue
                 team_map = {"AAA": "味全龍", "AEO": "富邦悍將", "AKP": "台鋼雄鷹",
                             "ACN": "中信兄弟", "AJL": "樂天桃猿", "ADD": "統一7-ELEVEn獅"}
@@ -175,11 +182,14 @@ def parse_feed(kind: str, data: Any) -> list[Game]:
                             home_name, away_name,
                             fallback_team_logo("baseball_cpbl", home_name),
                             fallback_team_logo("baseball_cpbl", away_name),
-                            "CPBL 2026 data", "scheduled", bool(g.get("time")))
+                            "CPBL 2026 data",
+                            "final" if cpbl_status in ("final", "finished") else "scheduled",
+                            bool(g.get("time")))
             else:
                 comp = g["competitions"][0]
                 status = comp.get("status", g.get("status", {})).get("type", {})
-                if status.get("completed") or status.get("state") == "post" or any(
+                is_final = bool(status.get("completed")) or status.get("state") == "post"
+                if (is_final and not include_final) or any(
                         word in status.get("name", "").lower() for word in ("cancel", "postpon")):
                     continue
                 h = next(c["team"] for c in comp["competitors"] if c.get("homeAway") == "home")
@@ -192,7 +202,9 @@ def parse_feed(kind: str, data: Any) -> list[Game]:
                 item = Game(str(g["id"]), "soccer" if is_soccer else "basketball", label,
                             instant(g["date"]), h["displayName"], a["displayName"],
                             espn_logo(h), espn_logo(a), "ESPN",
-                            "live" if status.get("state") == "in" else "scheduled", comp.get("timeValid") is not False)
+                            "final" if is_final else (
+                                "live" if status.get("state") == "in" else "scheduled"),
+                            comp.get("timeValid") is not False)
             if item.home.strip() and item.away.strip() and item.home != item.away:
                 out.append(item)
         except (KeyError, TypeError, ValueError, IndexError, AttributeError, StopIteration):
@@ -218,7 +230,8 @@ class Fixtures:
         self.retry_after: dict[str, float] = {}
         self.last: dict[str, Snapshot] = {}
 
-    async def source(self, name: str, url: str, params: dict, kind: str) -> tuple[list[Game], str | None]:
+    async def source(self, name: str, url: str, params: dict, kind: str,
+                     include_final: bool = False) -> tuple[list[Game], str | None]:
         if time.monotonic() < self.cooldown.get(name, 0):
             return [], name + ":cooldown"
         try:
@@ -253,7 +266,7 @@ class Fixtures:
                                 "basketball", "TPBL", dt, home, away, home_logo, away_logo,
                                 "TPBL 官方", "scheduled", True)
                     return [game], None
-                parsed = parse_feed(kind, response.json())
+                parsed = parse_feed(kind, response.json(), include_final=include_final)
                 if kind == "milb":
                     level = name.removeprefix("milb_")
                     parsed = [replace(game, source="MiLB:" + level) for game in parsed]
