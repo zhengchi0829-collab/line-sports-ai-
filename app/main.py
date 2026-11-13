@@ -174,11 +174,18 @@ async def continuous_refresh(app):
                 checks = (("英超", "soccer_epl", "足球"),
                           ("NBA", "basketball", "籃球"),
                           ("MLB", "baseball", "棒球"),
-                          ("CPBL", "baseball_cpbl", "棒球"))
+                          ("NPB", "baseball_npb", "棒球"),
+                          ("KBO", "baseball_kbo", "棒球"),
+                          ("CPBL", "baseball_cpbl", "棒球"),
+                          ("MiLB", "baseball_milb", "棒球"))
                 for league, key, sport_name in checks:
                     snapshot = app.state.controller.fixtures.last.get(key)
                     if league == "CPBL":
                         home, away = "中信兄弟", "統一7-ELEVEn獅"
+                    elif league == "NPB":
+                        home, away = "Yomiuri Giants", "Hanshin Tigers"
+                    elif league == "KBO":
+                        home, away = "KIA Tigers", "SSG Landers"
                     elif snapshot and snapshot.games:
                         game = snapshot.games[0]
                         home, away = game.home, game.away
@@ -188,9 +195,10 @@ async def continuous_refresh(app):
                     try:
                         context = await app.state.controller.team_details(
                             sport_name, home, away, league)
-                        log.info("verified_stats_probe league=%s form=%s roster=%s recommendation=%s",
+                        log.info("verified_stats_probe league=%s form=%s roster=%s recommendation=%s verified=%s",
                                  league, "勝率" in context[0],
-                                 "球員" in context[1], bool(context[2]))
+                                 "球員" in context[1], bool(context[2]),
+                                 "尚無可核實" not in context[0])
                     except Exception as exc:
                         log.error("verified_stats_probe league=%s exception=%s",
                                   league, type(exc).__name__)
