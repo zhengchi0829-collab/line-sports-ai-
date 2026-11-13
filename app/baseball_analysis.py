@@ -230,8 +230,16 @@ async def verified_baseball_analysis(client, league, home, away, translate=None)
                     "球員名單依資料來源提供。",None,None)
         index = 0 if (rates[0],net[0]) > (rates[1],net[1]) else 1
         winner = (home, away)[index]
-        wins, draws, losses = records[index]
-        form=f"{winner}｜歷史最近五場：{wins}勝、{draws}和、{losses}敗｜勝率 {wins*20:.1f}%"
+        # Show both verified teams; showing only the selected side hid the comparison.
+        def form_line(team_name, record, group):
+            wins, draws, losses = record
+            last_date = group[0][0][:10] if group else "未知"
+            return (f"{team_name}：近5場 {wins}勝{draws}和{losses}敗"
+                    f"｜勝率 {wins * 20:.0f}%｜最近一戰 {last_date}")
+        form = ("已核實歷史賽果（非勝率預測）\\n" +
+                form_line(home, records[0], games[0]) + "\\n" +
+                form_line(away, records[1], games[1]) +
+                "\\n近期戰績較佳：" + winner)
         # Expected scores use recent-game weighted runs for/against (5 most recent first).
         weights=[5,4,3,2,1]
         points_for=[sum(w*g[2] for w,g in zip(weights,group))/15 for group in games]
