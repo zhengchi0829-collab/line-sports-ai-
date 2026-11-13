@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 
 logger = logging.getLogger("sports_bot")
-SPORT_IDS = {"MLB": 1, "NPB": 31, "KBO": 32, "MiLB": 21}
+SPORT_IDS = {"MLB": (1,), "NPB": (31,), "KBO": (32,), "MiLB": (11, 12, 13, 14, 16)}
 UNAVAILABLE = ("尚無可核實的該聯盟歷史最近五場戰績，暫不顯示勝率。",
                "目前沒有可核實的該聯盟球員資料。", None, None)
 
@@ -174,14 +174,21 @@ async def verified_baseball_analysis(client, league, home, away, translate=None)
     """Return (form, roster, winner, metrics) with no fake observed statistics."""
     if league == "CPBL":
         return await verified_cpbl_analysis(client,home,away,translate)
-    sid = SPORT_IDS.get(league)
-    if sid is None:
+    sport_ids = SPORT_IDS.get(league)
+    if sport_ids is None:
         return UNAVAILABLE
     base = "https://statsapi.mlb.com/api/v1"
     try:
-        response = await client.get(base + "/teams", params={"sportId": sid}, timeout=3)
-        response.raise_for_status()
-        teams = response.json().get("teams", [])
+        # MiLB covers five levels; avoid treating aggregate sportId 21 as a team league.
+        async def load_teams(sid):
+            response = await client.get(base + "/teams",
+                                        params={"sportId": sid}, timeout=3)
+            response.raise_for_status()
+            return [(team, sid) for team in response.json().get("teams", [])]
+        team_responses = await asyncio.gather(
+            *(load_teams(sid) for sid in sport_ids), return_exceptions=True)
+        teams = [entry for response in team_responses if isinstance(response, list)
+                 for entry in response]
         if not teams:
             return UNAVAILABLE
         matches = []
@@ -191,17 +198,18 @@ async def verified_baseball_analysis(client, league, home, away, translate=None)
                            ("name", "teamName", "clubName", "abbreviation", "shortName")]
                 aliases.append((team.get("locationName") or "") + " " + (team.get("teamName") or ""))
                 return max((similarity(v, wanted, translate) for v in aliases), default=0.0)
-            chosen = max(teams, key=match_score)
+            chosen, selected_sid = max(teams, key=lambda entry: match_score(entry[0]))
             if match_score(chosen) < 0.74 or not chosen.get("id"):
                 logger.info("baseball_form_unknown_team league=%s",league)
                 return UNAVAILABLE
-            matches.append(chosen)
-        if matches[0]["id"] == matches[1]["id"]:
+            matches.append((chosen, selected_sid))
+        if matches[0][0]["id"] == matches[1][0]["id"]:
             return UNAVAILABLE
         now=datetime.now(timezone.utc)
         start=(now-timedelta(days=230)).date().isoformat()
         end=now.date().isoformat()
-        async def schedule(team):
+        async def schedule(entry):
+            team, sid = entry
             resp=await client.get(base + "/schedule",params={
                 "sportId":sid,"teamId":team["id"],"startDate":start,"endDate":end},
                 timeout=4)
@@ -244,7 +252,7 @@ async def verified_baseball_analysis(client, league, home, away, translate=None)
                  "expected_total":expected_total,"expected_margin":expected_margin}
         names=[]
         try:
-            roster=await client.get(base+f"/teams/{matches[index]['id']}/roster",
+            roster=await client.get(base+f"/teams/{matches[index][0]['id']}/roster",
                                     params={"rosterType":"active"},timeout=3)
             if roster.status_code==200:
                 for item in roster.json().get("roster",[]):
