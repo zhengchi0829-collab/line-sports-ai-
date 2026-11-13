@@ -138,6 +138,9 @@ async def continuous_refresh(app):
                                 "https://api.line.me/v2/bot/message/validate/reply",
                                 headers=headers, json={"messages": analysis})
                             log.info("soccer_analysis_validation league=%s status=%s", label, response.status_code)
+                            if response.status_code != 200:
+                                log.warning("soccer_analysis_payload_error league=%s details=%s",
+                                            label, response.text[:800])
                         except Exception as exc:
                             log.error("soccer_analysis_validation league=%s error=%s",
                                       label, type(exc).__name__)

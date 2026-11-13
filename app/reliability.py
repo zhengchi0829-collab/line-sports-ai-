@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.6.44"
+VERSION = "0.6.45"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -728,7 +728,7 @@ class Controller:
                                             pictures.append(text(self.ui.team_zh(title)[:4], "sm", "#334155"))
                                     card["contents"]["body"]["contents"].insert(
                                         0, {"type": "box", "layout": "horizontal", "alignItems": "center",
-                                            "justifyContent": "spaceAround", "spacing": "lg",
+                                            "justifyContent": "center", "spacing": "lg",
                                             "contents": pictures})
                                     break
                     if demo:
