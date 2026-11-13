@@ -454,7 +454,7 @@ def offline_analysis(sport, matchup=None, team_history=None, star_players=None, 
         handicap = str(handicap).replace(original, team_zh(original))
     # Format all model-estimated amounts in 0.5-unit increments.
     total = re.sub(
-        r"(預估(?:合計)?\\s*)(\\d+(?:\\.\\d+)?)",
+        r"(預估(?:合計)?\s*)(\d+(?:\.\d+)?)",
         lambda match: match.group(1) + f"{round(float(match.group(2)) * 2) / 2:.1f}",
         total)
     total = re.sub(r"（(?:歷史模型參考線|歷史模型參考|歷史模型線|模型參考)）", "", total)
