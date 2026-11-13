@@ -232,8 +232,10 @@ def parse_feed(kind: str, data: Any, include_final: bool = False) -> list[Game]:
                             "CPBL 2026 data",
                             "final" if cpbl_status in ("final", "finished") else "scheduled",
                             bool(g.get("time")),
-                            final_score(g.get("home_score", g.get("homeScore"))) if cpbl_status in ("final", "finished") else None,
-                            final_score(g.get("away_score", g.get("awayScore"))) if cpbl_status in ("final", "finished") else None)
+                            final_score(g.get("hs", g.get("home_score", g.get("homeScore"))))
+                            if cpbl_status in ("final", "finished") else None,
+                            final_score(g.get("as", g.get("away_score", g.get("awayScore"))))
+                            if cpbl_status in ("final", "finished") else None)
             else:
                 comp = g["competitions"][0]
                 status = comp.get("status", g.get("status", {})).get("type", {})
