@@ -627,7 +627,11 @@ Yale Bulldogs = 耶魯鬥牛犬
 Youngstown State Penguins = 揚斯敦州立企鵝
 Frederick Keys = 弗雷德里克鑰匙
 Greenville Drive = 格林維爾衝勁
-Hub City Spartanburgers = 哈布城斯帕坦堡漢堡""".splitlines()
+Hub City Spartanburgers = 哈布城斯帕坦堡漢堡
+Hill City Howlers = 山城嚎叫者
+Ontario Tower Buzzers = 安大略塔蜂
+Salem RidgeYaks = 塞勒姆山脊犛牛
+Wilson Warbirds = 威爾遜戰鳥""".splitlines()
     if " = " in line
 )
 
