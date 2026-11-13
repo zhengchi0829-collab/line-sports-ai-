@@ -173,16 +173,21 @@ async def continuous_refresh(app):
                 app.state.verified_stats_probe_done = True
                 checks = (("英超", "soccer_epl", "足球"),
                           ("NBA", "basketball", "籃球"),
-                          ("MLB", "baseball", "棒球"))
+                          ("MLB", "baseball", "棒球"),
+                          ("CPBL", "baseball_cpbl", "棒球"))
                 for league, key, sport_name in checks:
                     snapshot = app.state.controller.fixtures.last.get(key)
-                    if not snapshot or not snapshot.games:
+                    if league == "CPBL":
+                        home, away = "中信兄弟", "統一7-ELEVEn獅"
+                    elif snapshot and snapshot.games:
+                        game = snapshot.games[0]
+                        home, away = game.home, game.away
+                    else:
                         log.warning("verified_stats_probe league=%s result=no_games", league)
                         continue
-                    game = snapshot.games[0]
                     try:
                         context = await app.state.controller.team_details(
-                            sport_name, game.home, game.away, league)
+                            sport_name, home, away, league)
                         log.info("verified_stats_probe league=%s form=%s roster=%s recommendation=%s",
                                  league, "勝率" in context[0],
                                  "球員" in context[1], bool(context[2]))

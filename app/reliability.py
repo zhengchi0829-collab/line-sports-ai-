@@ -22,7 +22,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.6.65"
+VERSION = "0.6.66"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -551,6 +551,22 @@ def baseball_menu() -> dict:
 
 
 def notice(sport: str, snapshot: Snapshot) -> dict:
+    if sport.startswith("baseball"):
+        league = BASEBALL_LEAGUE_LABELS.get(sport, "MLB")
+        info = ("目前無即將開賽的賽程；仍可查詢歷史五場分析。"
+                if not snapshot.errors else
+                "賽程資料暫時無法連線；可手動輸入球隊進行歷史五場分析。")
+        return {"type":"flex","altText":league+"｜棒球賽程與分析",
+                "quickReply":quick_menu(),
+                "contents":{"type":"bubble","size":"kilo",
+                    "header":{"type":"box","layout":"vertical","backgroundColor":"#0F172A",
+                        "contents":[text("⚾ "+league,"lg","#FFFFFF","bold")]},
+                    "body":{"type":"box","layout":"vertical","spacing":"md",
+                        "contents":[text(info),text("輸入格式：分析"+league+" 主隊 vs 客隊","sm"),
+                                    text("僅使用該聯盟已核實的歷史比分，資料不足不虛構推薦。","xs")]},
+                    "footer":{"type":"box","layout":"vertical","spacing":"sm",
+                        "contents":[button("🔄 重新查詢賽程",league),
+                                    button("⚾ 返回棒球分類","棒球","#334155")]}}}
     name = SOCCER_LEAGUE_LABELS.get(sport) or SPORTS.get(sport, "\u8cfd\u4e8b")
     failed = bool(snapshot.errors)
     a, b = DEMO_PAIRS.get(sport, DEMO_PAIRS["soccer"])
