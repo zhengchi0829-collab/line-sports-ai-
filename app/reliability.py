@@ -10,6 +10,7 @@ import os
 from .odds import OddsGateway, format_book
 import hashlib
 import math
+from .baseball_analysis import verified_baseball_analysis
 import logging
 import re
 import time
@@ -21,7 +22,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.6.63"
+VERSION = "0.6.64"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -773,6 +774,14 @@ class Controller:
         cached = self.details.get(key)
         if cached and time.monotonic() - cached[0] < 1200:
             return cached[1]
+        if sport == "棒球":
+            # League-specific score and roster lookup; do not use MLB results for CPBL.
+            result = await verified_baseball_analysis(
+                self.fixtures.client, league or "MLB", a, b, self.ui.team_zh)
+            if len(self.details) >= 128:
+                self.details.pop(next(iter(self.details)))
+            self.details[key] = (time.monotonic(), result)
+            return result
         paths = {
             "英超": "soccer/eng.1", "西甲": "soccer/esp.1",
             "德甲": "soccer/ger.1", "義甲": "soccer/ita.1",
