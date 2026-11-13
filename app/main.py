@@ -290,6 +290,16 @@ async def continuous_refresh(app):
                     failures += 1
             app.state.last_background_refresh = time.time()
             app.state.background_refresh_counts = counts
+            if not getattr(app.state, "team_translation_checked", False):
+                app.state.team_translation_checked = True
+                for key in REFRESH_KEYS:
+                    snap = app.state.controller.fixtures.last.get(key)
+                    if snap and snap.games:
+                        names = sorted({name for game in snap.games
+                                        for name in (game.home, game.away)})
+                        missing = [name for name in names if ui.team_display(name) == name]
+                        log.info("team_translation_coverage league=%s translated=%s total=%s missing=%s",
+                                 key, len(names) - len(missing), len(names), missing[:16])
             # Once per startup, validate real soccer fixture and analysis cards
             # against the LINE payload schema; this sends no user-facing messages.
             if not app.state.soccer_validation_done:
