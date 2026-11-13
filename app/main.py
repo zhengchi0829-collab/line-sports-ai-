@@ -117,7 +117,8 @@ async def dated_flow_probe(app):
     # June is within the 2026 NPB/KBO/MLB regular seasons.
     selected = datetime(2026, 6, 20, tzinfo=TZ).date()
     for league, key in (("MLB", "baseball"), ("NPB", "baseball_npb"),
-                        ("KBO", "baseball_kbo")):
+                        ("KBO", "baseball_kbo"), ("CPBL", "baseball_cpbl"),
+                        ("MiLB", "baseball_milb")):
         try:
             snap = await asyncio.wait_for(ctl.fixtures.on_date(key, selected), timeout=12)
             if not snap.games:
@@ -136,8 +137,12 @@ async def dated_flow_probe(app):
             ok = bool(analysis and analysis[0].get("type") == "flex"
                       and selected.strftime("%Y/%m/%d")
                       in str(analysis[0].get("contents", {}).get("header", {})))
+            if ok:
+                detail = str(analysis[0]["contents"]["body"]["contents"][0]
+                             ["contents"][1].get("text", ""))
+                ok = "勝率" in detail and "尚無可核實" not in detail
             if not ok:
-                raise AssertionError("dated analysis did not return correct fixture card")
+                raise AssertionError("dated analysis missing verified pregame five-game form")
             token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "").strip()
             if token:
                 response = await app.state.line_client.post(
