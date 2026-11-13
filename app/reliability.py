@@ -23,7 +23,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.7.4"
+VERSION = "0.7.5"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -672,20 +672,37 @@ def odds_category_menu() -> dict:
 
 
 def odds_league_menu(provider: str) -> dict:
+    """Always display actionable leagues even when the API token is missing.
+
+    The next step reports the actual data availability instead of silently
+    stopping at a credential warning. Both sources remain odds-menu only.
+    """
     prefix = "台灣運彩" if provider == "台灣運彩賠率" else "娛樂平台"
     key = "JBOT_API_TOKEN" if prefix == "台灣運彩" else "THE_ODDS_API_KEY"
-    if not os.getenv(key,"").strip():
-        return odds_source_card(provider)
-    if prefix=="台灣運彩":
-        leagues = ("NBA","MLB","英超","西甲","德甲","義甲","法甲","歐冠","NPB","KBO","CPBL")
+    configured = bool(os.getenv(key, "").strip())
+    if prefix == "台灣運彩":
+        leagues = ("NBA", "MLB", "英超", "西甲", "德甲", "義甲", "法甲",
+                   "歐冠", "NPB", "KBO", "CPBL")
     else:
-        leagues = ("NBA","MLB","英超","西甲","德甲","義甲","法甲","歐冠")
-    return {"type":"flex","altText":provider+"｜選擇聯賽","quickReply":quick_menu(),
-        "contents":{"type":"bubble","size":"kilo",
-            "header":{"type":"box","layout":"vertical","backgroundColor":"#0F172A",
-                "contents":[text("📊 "+provider,"lg","#FFFFFF","bold")]},
-            "body":{"type":"box","layout":"vertical","spacing":"sm",
-                "contents":[button("📈 "+lg,"賠率"+prefix+lg,"#0F766E") for lg in leagues[:12]]}}}
+        leagues = ("NBA", "MLB", "英超", "西甲", "德甲", "義甲", "法甲", "歐冠")
+    return {"type": "flex", "altText": provider + "｜選擇聯盟",
+            "quickReply": quick_menu(),
+            "contents": {"type": "bubble", "size": "kilo",
+                "header": {"type": "box", "layout": "vertical",
+                           "backgroundColor": "#0F172A", "paddingAll": "16px",
+                           "spacing": "sm", "contents": [
+                               text("📊 " + provider, "lg", "#FFFFFF", "bold"),
+                               text("請選擇要查詢的聯盟", "sm", "#CBD5E1")]},
+                "body": {"type": "box", "layout": "vertical",
+                         "spacing": "xs", "paddingAll": "12px",
+                         "contents": [
+                             *(button("📈 " + league, "賠率" + prefix + league)
+                               for league in leagues),
+                             text("尚未設定授權 API；點選聯盟可查看原因。" if not configured
+                                  else "僅顯示有來源、可核實的賠率資料。",
+                                  "xs", "#CBD5E1"),
+                             button("↩ 返回賠率分類", "檢視賠率", "#334155"),
+                         ]}}}
 
 
 def odds_source_card(provider: str) -> dict:
