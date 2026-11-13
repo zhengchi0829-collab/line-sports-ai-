@@ -22,7 +22,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.6.71"
+VERSION = "0.6.72"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -815,8 +815,25 @@ class Controller:
             return cached[1]
         if sport == "棒球":
             # League-specific score and roster lookup; do not use MLB results for CPBL.
+            team_ids = None
+            if league == "MiLB":
+                # Fixture logos encode the official Stats API team IDs; they are more
+                # reliable than a generic team search when the next season is scheduled.
+                snapshot = self.fixtures.last.get("baseball_milb")
+                def norm_team(value):
+                    return re.sub(r"[^\\w]", "", str(value)).casefold()
+                if snapshot:
+                    for game in snapshot.games:
+                        if (norm_team(a) in (norm_team(game.home), norm_team(self.ui.team_zh(game.home)))
+                            and norm_team(b) in (norm_team(game.away), norm_team(self.ui.team_zh(game.away)))):
+                            home_id = re.search(r"/(\\d+)\\.svg$", game.home_logo)
+                            away_id = re.search(r"/(\\d+)\\.svg$", game.away_logo)
+                            if home_id and away_id:
+                                team_ids = (home_id.group(1), away_id.group(1))
+                            break
             result = await verified_baseball_analysis(
-                self.fixtures.client, league or "MLB", a, b, self.ui.team_zh)
+                self.fixtures.client, league or "MLB", a, b, self.ui.team_zh,
+                team_ids=team_ids)
             if len(self.details) >= 128:
                 self.details.pop(next(iter(self.details)))
             self.details[key] = (time.monotonic(), result)
