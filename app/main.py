@@ -24,7 +24,7 @@ from . import legacy as ui
 from .reliability import (Controller, Game, Snapshot, SPORTS, TZ, VERSION,
                           fixture_cards, notice, quick_menu, date_category_menu,
                           date_league_menu, odds_category_menu, odds_source_card,
-                          select_games, SPECIFIED)
+                          select_games, SPECIFIED, holographic_messages)
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
 log = logging.getLogger("sports_bot")
@@ -74,7 +74,7 @@ async def startup_probe(app):
             headers = {"Authorization": "Bearer " + token}
             response = await app.state.line_client.post(
                 "https://api.line.me/v2/bot/message/validate/reply",
-                headers=headers, json={"messages": samples})
+                headers=headers, json={"messages": holographic_messages(samples)})
             app.state.line_validation = response.status_code
             log.info("line_message_validation status=%s version=%s", response.status_code, VERSION)
             new_cards = [date_category_menu("今日賽事"),
@@ -83,16 +83,31 @@ async def startup_probe(app):
                          odds_source_card("娛樂平台賠率")]
             checked = await app.state.line_client.post(
                 "https://api.line.me/v2/bot/message/validate/reply",
-                headers=headers, json={"messages": new_cards})
+                headers=headers, json={"messages": holographic_messages(new_cards)})
             log.info("line_new_menus_validation status=%s version=%s", checked.status_code, VERSION)
             if checked.status_code != 200:
                 log.warning("line_new_menus_detail %s", checked.text[:800])
+            # Validate primary navigation in one official LINE schema request.
+            theme_cards = [
+                (await app.state.controller.reply("選單"))[0],
+                (await app.state.controller.reply("足球"))[0],
+                (await app.state.controller.reply("籃球"))[0],
+                (await app.state.controller.reply("棒球"))[0],
+            ]
+            check_theme = await app.state.line_client.post(
+                "https://api.line.me/v2/bot/message/validate/reply",
+                headers=headers, json={"messages": holographic_messages(theme_cards)})
+            log.info("line_holographic_menus_validation status=%s version=%s",
+                     check_theme.status_code, VERSION)
+            if check_theme.status_code != 200:
+                log.warning("line_holographic_menus_detail %s",
+                            check_theme.text[:850])
             date_cards = [date_category_menu(SPECIFIED),
                           date_category_menu(SPECIFIED, check_now.date()),
                           date_league_menu("今日賽事", "棒球", check_now.date())]
             check_date = await app.state.line_client.post(
                 "https://api.line.me/v2/bot/message/validate/reply",
-                headers=headers, json={"messages": date_cards})
+                headers=headers, json={"messages": holographic_messages(date_cards)})
             log.info("line_date_menus_validation status=%s version=%s",
                      check_date.status_code, VERSION)
             if check_date.status_code != 200:
@@ -102,7 +117,7 @@ async def startup_probe(app):
                     card = fixture_cards(sport, snap, ui.team_zh)
                     checked = await app.state.line_client.post(
                         "https://api.line.me/v2/bot/message/validate/reply",
-                        headers=headers, json={"messages": [card]})
+                        headers=headers, json={"messages": holographic_messages([card])})
                     log.info("line_fixture_validation sport=%s status=%s", sport, checked.status_code)
     except asyncio.CancelledError:
         raise
@@ -232,7 +247,7 @@ async def dated_flow_probe(app):
                 response = await app.state.line_client.post(
                     "https://api.line.me/v2/bot/message/validate/reply",
                     headers={"Authorization": "Bearer " + token},
-                    json={"messages": [card, *analysis[:1]]})
+                    json={"messages": holographic_messages([card, *analysis[:1]])})
                 if response.status_code != 200:
                     log.warning("dated_analysis_line_validation league=%s status=%s detail=%s",
                                 league, response.status_code, response.text[:350])
@@ -333,7 +348,7 @@ async def continuous_refresh(app):
                                 f"分析{label} {game.home} vs {game.away}")
                             response = await app.state.line_client.post(
                                 "https://api.line.me/v2/bot/message/validate/reply",
-                                headers=headers, json={"messages": analysis})
+                                headers=headers, json={"messages": holographic_messages(analysis)})
                             log.info("soccer_analysis_validation league=%s status=%s", label, response.status_code)
                             if response.status_code != 200:
                                 log.warning("soccer_analysis_payload_error league=%s details=%s",
@@ -494,6 +509,7 @@ async def process_event(event, app):
     fallback_text = "系統剛剛忙碌或資料來源暫時無法回應，請再點一次原本的按鈕。"
     try:
         messages = await asyncio.wait_for(app.state.controller.reply(raw), timeout=18.0)
+        messages = holographic_messages(messages)
         if not isinstance(messages, list) or not messages:
             raise ValueError("empty_messages")
     except asyncio.CancelledError:
