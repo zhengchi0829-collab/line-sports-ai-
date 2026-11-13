@@ -23,7 +23,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.7.0"
+VERSION = "0.7.1"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -941,6 +941,113 @@ def fixture_cards(sport: str, snapshot: Snapshot, team_name, today=False, now=No
                     f" {g.start:%Y-%m-%d} {g.home} vs {g.away}", accent)]}})
     return {"type": "flex", "altText": (basketball_league_label(sport) if sport.startswith("basketball") else (baseball_league_label(sport) if sport.startswith("baseball") else SOCCER_LEAGUE_LABELS.get(sport, SPORTS.get(sport, sport)))) + "\u8fd1\u671f\u8cfd\u4e8b\uff5c\u9ede\u9078\u5206\u6790",
             "quickReply": quick_menu(), "contents": {"type": "carousel", "contents": bubbles}}
+
+
+
+# Shared holographic visual theme. This changes presentation, never actions,
+# original team identities, match dates, or numeric analysis values.
+HUD_BG = "#061425"
+HUD_HEADER = "#071A2D"
+HUD_PANEL = "#10304F"
+HUD_BLUE = "#075491"
+HUD_BORDER = "#12DCFF"
+HUD_LIGHT = "#E9F9FF"
+HUD_MUTED = "#9ABBD0"
+
+
+def holographic_theme(message: dict) -> dict:
+    """Style every LINE Flex UI while preserving all actionable payloads.
+
+    Uses only supported LINE Flex elements; unlike an image mock-up, its
+    navigation stays tappable and readable on Android and iOS.
+    """
+    if not isinstance(message, dict) or message.get("type") != "flex":
+        return message
+    # The baseball entry is already the approved first-preview implementation.
+    if "全息科技選單" in message.get("altText", ""):
+        return message
+
+    def transform(value):
+        if isinstance(value, list):
+            return [transform(item) for item in value]
+        if not isinstance(value, dict):
+            return value
+        node = {key: transform(item) for key, item in value.items()}
+        kind = node.get("type")
+        if kind == "button":
+            action = node.get("action", {})
+            if action.get("type") == "message":
+                label = action.get("label", "選擇")
+                return {
+                    "type": "box", "layout": "horizontal", "flex": node.get("flex", 1),
+                    "height": "48px", "alignItems": "center",
+                    "justifyContent": "center", "cornerRadius": "11px",
+                    "backgroundColor": HUD_BLUE,
+                    "borderColor": HUD_BORDER, "borderWidth": "1px",
+                    "paddingStart": "9px", "paddingEnd": "9px",
+                    "action": action,
+                    "contents": [{"type": "text", "text": label, "size": "sm",
+                                  "color": "#FFFFFF", "weight": "bold",
+                                  "wrap": True, "align": "center"}],
+                }
+            # Date picker and external links keep their native LINE button
+            # representation, which has better platform compatibility.
+            if node.get("style") == "secondary":
+                node["style"] = "primary"
+            node["color"] = HUD_BLUE
+        elif kind == "box":
+            original = node.get("backgroundColor")
+            if original:
+                if original.upper() in ("#FFFFFF", "#F4F7FB", "#F1F5F9",
+                                        "#F5F7FA", "#E2E8F0"):
+                    node["backgroundColor"] = HUD_PANEL
+                elif original.upper() in ("#0F172A", "#061425", "#071A2D"):
+                    node["backgroundColor"] = HUD_HEADER
+                elif original.upper() in ("#263D56", "#103B5E", "#075491"):
+                    node["backgroundColor"] = original
+                else:
+                    node["backgroundColor"] = HUD_BLUE
+            if node.get("borderColor"):
+                node["borderColor"] = HUD_BORDER
+        elif kind == "text":
+            original = str(node.get("color", "#334155")).upper()
+            if original in ("#334155", "#0F172A", "#111827", "#475569",
+                            "#1F2937", "#FFFFFF", "#F8FAFC", "#E2E8F0"):
+                node["color"] = HUD_LIGHT
+            elif original in ("#64748B", "#94A3B8", "#CBD5E1", "#9CA3AF"):
+                node["color"] = HUD_MUTED
+            elif original not in ("#FDE68A", "#FBBF24", "#F87171"):
+                node["color"] = "#55EFFF"
+        elif kind == "separator":
+            node["color"] = "#175876"
+        elif kind == "bubble":
+            node["styles"] = {
+                "header": {"backgroundColor": HUD_HEADER},
+                "body": {"backgroundColor": HUD_BG},
+                "footer": {"backgroundColor": HUD_BG},
+            }
+            for section in ("header", "body", "footer"):
+                box = node.get(section)
+                if isinstance(box, dict):
+                    box["backgroundColor"] = (HUD_HEADER if section == "header"
+                                              else HUD_BG)
+            if isinstance(node.get("header"), dict):
+                header = node["header"]
+                texts = header.get("contents")
+                if isinstance(texts, list) and texts and len(texts) < 9:
+                    texts.insert(0, {"type": "text", "text": "H Z  /  SPORTS AI",
+                                     "size": "xxs", "color": HUD_BORDER,
+                                     "weight": "bold"})
+        return node
+
+    result = transform(message)
+    result["altText"] = str(result.get("altText", "SPORTS AI"))[:400]
+    return result
+
+
+def holographic_messages(messages: list[dict]) -> list[dict]:
+    return [holographic_theme(message) for message in messages]
+
 
 
 class Controller:
