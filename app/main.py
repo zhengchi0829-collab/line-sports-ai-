@@ -97,12 +97,17 @@ async def startup_probe(app):
                          odds_source_card("娛樂平台賠率"),
                          odds_league_menu("台灣運彩賠率"),
                          odds_league_menu("娛樂平台賠率")]
-            checked = await app.state.line_client.post(
-                "https://api.line.me/v2/bot/message/validate/reply",
-                headers=headers, json={"messages": holographic_messages(new_cards)})
-            log.info("line_new_menus_validation status=%s version=%s", checked.status_code, VERSION)
-            if checked.status_code != 200:
-                log.warning("line_new_menus_detail %s", checked.text[:800])
+            for batch_index in range(0, len(new_cards), 5):
+                # LINE validation accepts at most five messages per request.
+                group = new_cards[batch_index:batch_index + 5]
+                checked = await app.state.line_client.post(
+                    "https://api.line.me/v2/bot/message/validate/reply",
+                    headers=headers, json={"messages": holographic_messages(group)})
+                log.info("line_new_menus_validation batch=%s status=%s version=%s",
+                         batch_index // 5 + 1, checked.status_code, VERSION)
+                if checked.status_code != 200:
+                    log.warning("line_new_menus_detail batch=%s %s",
+                                batch_index // 5 + 1, checked.text[:800])
             # Validate primary navigation in one official LINE schema request.
             theme_cards = [
                 (await app.state.controller.reply("選單"))[0],
