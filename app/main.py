@@ -23,7 +23,8 @@ from fastapi import FastAPI, HTTPException, Request
 from . import legacy as ui
 from .reliability import (Controller, Game, Snapshot, SPORTS, TZ, VERSION,
                           fixture_cards, notice, quick_menu, date_category_menu,
-                          odds_category_menu, odds_source_card, select_games)
+                          date_league_menu, odds_category_menu, odds_source_card,
+                          select_games, SPECIFIED)
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
 log = logging.getLogger("sports_bot")
@@ -57,6 +58,15 @@ async def startup_probe(app):
         for sport in SPORTS.values():
             handicap_card = ui.offline_analysis(sport, "A vs B")
             assert any("讓球" in str(row) for row in handicap_card["contents"]["body"]["contents"])
+        sample_past = Game("past-test", "baseball", "MLB",
+                           check_now - timedelta(days=2), "A", "B", state="final")
+        assert [g.ident for g in select_games(
+            [sample_today, sample_tomorrow, sample_past], check_now,
+            on_date=sample_past.start.date())] == ["past-test"]
+        dated = fixture_cards("baseball", Snapshot(games=[sample_today], fetched=check_now),
+                              ui.team_zh, on_date=check_now.date(), now=check_now)
+        dated_command = dated["contents"]["contents"][0]["footer"]["contents"][0]["action"]["text"]
+        assert check_now.date().isoformat() in dated_command
         log.info("date_filter_checks=passed version=%s", VERSION)
         log.info("startup_ui_checks=passed version=%s", VERSION)
         token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "").strip()
@@ -77,6 +87,16 @@ async def startup_probe(app):
             log.info("line_new_menus_validation status=%s version=%s", checked.status_code, VERSION)
             if checked.status_code != 200:
                 log.warning("line_new_menus_detail %s", checked.text[:800])
+            date_cards = [date_category_menu(SPECIFIED),
+                          date_category_menu(SPECIFIED, check_now.date()),
+                          date_league_menu("今日賽事", "棒球", check_now.date())]
+            check_date = await app.state.line_client.post(
+                "https://api.line.me/v2/bot/message/validate/reply",
+                headers=headers, json={"messages": date_cards})
+            log.info("line_date_menus_validation status=%s version=%s",
+                     check_date.status_code, VERSION)
+            if check_date.status_code != 200:
+                log.warning("line_date_menus_detail %s", check_date.text[:900])
             for sport, snap in zip(SPORTS, results):
                 if snap.games:
                     card = fixture_cards(sport, snap, ui.team_zh)
@@ -297,7 +317,13 @@ async def process_event(event, app):
     if event.get("type") == "message":
         raw = event.get("message", {}).get("text", "")
     elif event.get("type") == "postback":
-        raw = event.get("postback", {}).get("data", "").removeprefix("cmd:")
+        postback = event.get("postback", {})
+        raw = postback.get("data", "").removeprefix("cmd:")
+        params = postback.get("params", {})
+        if raw == SPECIFIED and isinstance(params, dict):
+            selected_date = params.get("date")
+            if isinstance(selected_date, str):
+                raw = SPECIFIED + selected_date[:10]
 
     fallback_text = "系統剛剛忙碌或資料來源暫時無法回應，請再點一次原本的按鈕。"
     try:
