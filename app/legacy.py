@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import FastAPI, Header, HTTPException, Request
 
-app = FastAPI(title="體育AI分析系統", version="0.6.46")
+app = FastAPI(title="體育AI分析系統", version="0.6.47")
 log = logging.getLogger("sports_bot")
 TZ = ZoneInfo("Asia/Taipei")
 MENU = ("歡迎使用【體育AI分析系統】！\n\n"
@@ -36,7 +36,7 @@ def menu_card():
         ("⚽ 足球", "足球", "#0F766E"),
         ("🏀 籃球", "籃球", "#C2410C"),
         ("⚾ 棒球", "棒球", "#7C3AED"),
-        ("📊 賽事分析", "賽事分析", "#334155"),
+        ("📊 檢視賠率", "檢視賠率", "#334155"),
         ("🗓 未來賽事", "未來賽事", "#334155"),
     ]
     def button(label, command, color):
@@ -389,6 +389,19 @@ def offline_analysis(sport, matchup=None, team_history=None, star_players=None, 
         line = baseball_lines[(pick >> 4) % len(baseball_lines)]
         direction = "大" if ((pick >> 2) & 1) else "小"
         total = f"{direction} {line} 分"
+    # Without a verified sportsbook line, handicap is a clearly labelled scenario.
+    # A simulated handicap does NOT imply a measured edge or an actual offered market.
+    if sport == "足球":
+        handicap = f"{winner} -0.5 球（情境模擬）"
+        handicap_reason = "若支持隊伍僅平局，-0.5 不會過盤；須比較破門效率、陣容與對手防守。"
+    elif sport == "籃球":
+        demo_spread = (2.5, 4.5, 6.5, 8.5)
+        spread = demo_spread[(pick >> 5) % len(demo_spread)]
+        handicap = f"{winner} -{spread:g} 分（情境模擬）"
+        handicap_reason = f"須至少贏 {spread:g} 分以上才會過盤；考慮節奏、輪替、傷停與末節犯規。"
+    else:
+        handicap = f"{winner} -1.5 分（情境模擬）"
+        handicap_reason = "需贏 2 分以上才會過盤；應核實先發投手、牛棚、打線與主客場。"
     # Always show both sections. Distinguish verified facts from scouting criteria.
     if team_history:
         focus = team_history
@@ -434,7 +447,10 @@ def offline_analysis(sport, matchup=None, team_history=None, star_players=None, 
                              txt(f"🏆 獨贏  {winner}", "md", "#FFFFFF", "bold"),
                              {"type": "separator", "color": "#475569"},
                              txt(f"📊 大小分  {total}", "md", "#FFFFFF", "bold"),
-                             txt("模擬方向 · 非即時盤口", "xxs", "#CBD5E1")
+                             {"type": "separator", "color": "#475569"},
+                             txt(f"⚖️ 讓球  {handicap}", "md", "#FFFFFF", "bold"),
+                             txt(handicap_reason, "xs", "#CBD5E1"),
+                             txt("以上為情境模擬，非平台實際盤口或已驗證勝率", "xxs", "#CBD5E1")
                          ]}
                     ]},
                 "footer": {"type": "box", "layout": "vertical", "backgroundColor": "#FFFFFF",

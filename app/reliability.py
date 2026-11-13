@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.6.46"
+VERSION = "0.6.47"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -368,13 +368,17 @@ class Fixtures:
         await asyncio.gather(*self.jobs.values(), return_exceptions=True)
 
 
-def select_games(games: list[Game], now: datetime, today: bool = False) -> list[Game]:
-    valid = [g for g in games if g.state == "live" or g.start >= now or
-             (not g.time_known and g.start.date() >= now.date())]
+def select_games(games: list[Game], now: datetime, today: bool = False,
+                 future: bool = False) -> list[Game]:
     if today:
-        current = [g for g in valid if g.start.date() == now.date()]
-        if current:
-            valid = current
+        # Today's calendar day in Asia/Taipei. No fallback to tomorrow.
+        valid = [g for g in games if g.start.date() == now.date()]
+    elif future:
+        # Strictly exclude today, even games starting later tonight.
+        valid = [g for g in games if g.start.date() > now.date()]
+    else:
+        valid = [g for g in games if g.state == "live" or g.start >= now or
+                 (not g.time_known and g.start.date() >= now.date())]
     return sorted(valid, key=lambda g: (g.state != "live", g.start))[:8]
 
 
@@ -391,10 +395,78 @@ def button(label: str, command: str, color="#0F766E") -> dict:
 def quick_menu() -> dict:
     labels = [
         ("⚽ 足球", "足球"), ("🏀 籃球", "籃球"), ("⚾ 棒球", "棒球"),
-        ("📅 今日賽事", TODAY), ("🗓️ 未來賽事", FUTURE), ("🏠 主選單", MENU),
+        ("📅 今日賽事", TODAY), ("🗓️ 未來賽事", FUTURE), ("📊 檢視賠率", "檢視賠率"), ("🏠 主選單", MENU),
     ]
     return {"items": [{"type": "action", "action": {"type": "message", "label": label, "text": cmd}}
                       for label, cmd in labels]}
+
+
+CATEGORY_SOURCES = {
+    "足球": ("soccer_epl", "soccer_laliga", "soccer_bundesliga",
+             "soccer_seriea", "soccer_ligue1", "soccer_ucl"),
+    "籃球": ("basketball", "basketball_ncaa", "basketball_nbl", "basketball_tpbl"),
+    "棒球": ("baseball", "baseball_npb", "baseball_kbo", "baseball_cpbl", "baseball_milb"),
+}
+
+
+def date_category_menu(mode: str) -> dict:
+    title = "今日賽事" if mode == TODAY else "未來賽事"
+    desc = ("僅顯示台灣時間今日賽事" if mode == TODAY
+            else "僅顯示明天起的賽事，不包含今日")
+    return {"type": "flex", "altText": title + "｜請選擇運動種類",
+            "quickReply": quick_menu(),
+            "contents": {"type": "bubble", "size": "kilo",
+                "header": {"type": "box", "layout": "vertical",
+                           "backgroundColor": "#0F172A", "paddingAll": "16px",
+                           "contents": [text("📅 " + title, "lg", "#FFFFFF", "bold"),
+                                        text(desc, "sm", "#CBD5E1")]},
+                "body": {"type": "box", "layout": "vertical", "spacing": "md",
+                         "contents": [button("⚽ 足球", mode + "足球", "#0F766E"),
+                                      button("🏀 籃球", mode + "籃球", "#C2410C"),
+                                      button("⚾ 棒球", mode + "棒球", "#7C3AED"),
+                                      button("🏠 回主選單", MENU, "#334155")]}}}
+
+
+def odds_category_menu() -> dict:
+    return {"type": "flex", "altText": "檢視賠率｜選擇來源",
+            "quickReply": quick_menu(),
+            "contents": {"type": "bubble", "size": "kilo",
+                "header": {"type": "box", "layout": "vertical",
+                           "backgroundColor": "#0F172A", "paddingAll": "16px",
+                           "contents": [text("📊 檢視賠率", "lg", "#FFFFFF", "bold"),
+                                        text("選擇資料來源；不使用模擬賠率", "sm", "#CBD5E1")]},
+                "body": {"type": "box", "layout": "vertical", "spacing": "md",
+                         "contents": [button("🇹🇼 台灣運彩賠率", "台灣運彩賠率", "#0F766E"),
+                                      button("🎮 娛樂平台賠率", "娛樂平台賠率", "#7C3AED"),
+                                      button("🏠 回主選單", MENU, "#334155")]}}}
+
+
+def odds_source_card(provider: str) -> dict:
+    official = provider == "台灣運彩賠率"
+    desc = ("目前尚未取得可供機器讀取與核實的台灣運彩即時賠率資料。"
+            "請由官方賽事表查看當下價格；不會顯示猜測值。"
+            if official else
+            "尚未指定娛樂平台或接入該平台的合法即時賠率資料源。"
+            "不同平台盤口與賠率不同，不能套用其他平台的數據。")
+    controls = [button("🔄 重新查詢來源", provider, "#0F766E"),
+                button("↩ 返回賠率分類", "檢視賠率", "#334155")]
+    if official:
+        controls.insert(0, {"type": "button", "style": "primary", "height": "sm",
+                            "color": "#2563EB",
+                            "action": {"type": "uri", "label": "🔎 官方賠率頁",
+                                       "uri": "https://www.sportslottery.com.tw/"}})
+    return {"type": "flex", "altText": provider + "｜暫無可驗證即時賠率",
+            "quickReply": quick_menu(),
+            "contents": {"type": "bubble", "size": "kilo",
+                "header": {"type": "box", "layout": "vertical", "backgroundColor": "#0F172A",
+                           "paddingAll": "16px", "contents": [
+                               text("📊 " + provider, "lg", "#FFFFFF", "bold")]},
+                "body": {"type": "box", "layout": "vertical", "spacing": "md",
+                         "contents": [text("目前無可驗證賠率", "md", "#B45309", "bold"),
+                                      text(desc, "sm"),
+                                      text("賠率隨時可能變動；僅顯示經來源核實的資料。", "xs")]},
+                "footer": {"type": "box", "layout": "vertical", "spacing": "sm",
+                           "contents": controls}}}
 
 
 def soccer_menu() -> dict:
@@ -598,6 +670,45 @@ def fixture_cards(sport: str, snapshot: Snapshot, team_name, today=False, now=No
 
 
 class Controller:
+    async def category_fixtures(self, mode: str, category: str) -> dict:
+        now = datetime.now(TZ)
+        keys = CATEGORY_SOURCES[category]
+        results = await asyncio.gather(
+            *(self.fixtures.get(key) for key in keys), return_exceptions=True)
+        options = []
+        had_error = False
+        for key, result in zip(keys, results):
+            if not isinstance(result, Snapshot):
+                had_error = True
+                continue
+            had_error = had_error or bool(result.errors)
+            for game in result.games:
+                if ((mode == TODAY and game.start.date() == now.date()) or
+                    (mode == FUTURE and game.start.date() > now.date())):
+                    options.append((game, key, result))
+        options.sort(key=lambda item: (item[0].start, item[1], item[0].ident))
+        bubbles = []
+        used = set()
+        for game, key, snap in options:
+            unique = (game.start.isoformat(), game.home.casefold(), game.away.casefold())
+            if unique in used:
+                continue
+            used.add(unique)
+            selected = Snapshot([game], snap.fetched, snap.errors, snap.successes, snap.stale)
+            result = fixture_cards(key, selected, self.ui.team_zh, now=now)
+            bubbles.extend(result["contents"].get("contents", []))
+            if len(bubbles) >= 8:
+                break
+        if not bubbles:
+            text_value = (("當日無其他" + category + "賽事") if mode == TODAY
+                          else ("目前無未來" + category + "賽事"))
+            if had_error:
+                text_value += "\n部分賽程資料來源暫時無法連線，請稍後再試。"
+            return {"type": "text", "text": text_value, "quickReply": quick_menu()}
+        return {"type": "flex", "altText": mode + "｜" + category + "｜選擇立即分析",
+                "quickReply": quick_menu(),
+                "contents": {"type": "carousel", "contents": bubbles}}
+
     def baseball_league_entry(self, league: str, zh: str) -> dict:
         return {"type": "flex", "altText": f"{league}｜{zh} 對戰分析", "quickReply": quick_menu(),
                 "contents": {"type": "bubble", "size": "kilo",
@@ -671,13 +782,18 @@ class Controller:
             return [league_menu()]
         if compact == "棒球":
             return [baseball_menu()]
+        if compact in (TODAY, FUTURE):
+            return [date_category_menu(compact)]
+        for period in (TODAY, FUTURE):
+            if compact.startswith(period) and compact[len(period):] in CATEGORY_SOURCES:
+                return [await self.category_fixtures(period, compact[len(period):])]
+        if compact in ("賽事分析", "檢視賠率"):
+            return [odds_category_menu()]
+        if compact in ("台灣運彩賠率", "娛樂平台賠率"):
+            return [odds_source_card(compact)]
         if compact in KEYS:
             key = KEYS[compact]
             return [fixture_cards(key, await self.fixtures.get(key), self.ui.team_zh)]
-        if compact in (TODAY, FUTURE):
-            snapshots = await asyncio.gather(*(self.fixtures.get(key) for key in SPORTS), return_exceptions=True)
-            return [fixture_cards(key, snap if isinstance(snap, Snapshot) else Snapshot(errors=["internal_error"]),
-                                  self.ui.team_zh, today=compact == TODAY) for key, snap in zip(SPORTS, snapshots)]
         match = re.match(r"^\s*分析\s*(英超|西甲|德甲|義甲|法甲|歐冠|足球|籃球|棒球|NBA|NCAA|NBL|TPBL|MLB|NPB|KBO|CPBL|MiLB)\s*(.*)$", raw, re.S)
         if match:
             sport, matchup = match.groups()
