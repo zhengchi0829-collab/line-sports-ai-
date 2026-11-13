@@ -300,6 +300,10 @@ async def continuous_refresh(app):
                         missing = [name for name in names if ui.team_display(name) == name]
                         log.info("team_translation_coverage league=%s translated=%s total=%s missing=%s",
                                  key, len(names) - len(missing), len(names), missing[:16])
+                        if key == "basketball_ncaa" and missing:
+                            for offset in range(0, len(missing), 24):
+                                log.info("ncaa_name_gap group=%s names=%s",
+                                         offset // 24, missing[offset:offset + 24])
             # Once per startup, validate real soccer fixture and analysis cards
             # against the LINE payload schema; this sends no user-facing messages.
             if not app.state.soccer_validation_done:
