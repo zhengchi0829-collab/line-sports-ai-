@@ -9,6 +9,7 @@ import asyncio
 import os
 from .odds import OddsGateway, format_book
 import hashlib
+import math
 import logging
 import re
 import time
@@ -20,7 +21,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.6.62"
+VERSION = "0.6.63"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -905,26 +906,27 @@ class Controller:
                     historical_totals = [x + y for group in scores for x, y in group]
                     historical_mean = sum(historical_totals) / len(historical_totals)
                     # Internal reference threshold derived from history, not an offered line.
-                    reference = (round(historical_mean * 2) / 2)
+                    # Half-point model lines (x.5): avoid integer push outcomes.
+                    reference = math.floor(historical_mean) + 0.5
                     total_direction = ("大" if expected_total > reference + 0.15 else
                                        ("小" if expected_total < reference - 0.15 else "接近參考線"))
                     unit = "球" if sport == "足球" else "分"
-                    total_text = (f"{total_direction} {reference:g} {unit}（歷史模型參考線）"
+                    total_text = (f"{total_direction} {reference:.1f} {unit}（歷史模型參考線）"
                                   f"｜預估合計 {expected_total:.1f} {unit}")
                     if sport == "足球":
                         handicap_line = 0.5
                     elif sport == "棒球":
                         handicap_line = 1.5
                     else:
-                        handicap_line = max(0.5, round(abs(expected_margin) * 2) / 2 - 0.5)
+                        handicap_line = math.floor(abs(expected_margin)) + 0.5
                     # Choose a side only if projected difference exceeds the internal line.
                     favored_index = 0 if expected_margin > 0 else 1
                     favored = (a, b)[favored_index]
                     projected = abs(expected_margin)
                     if projected > handicap_line + (0.1 if sport == "足球" else 0.3):
-                        handicap_text = f"{favored} -{handicap_line:g} {unit}（模型參考）"
+                        handicap_text = f"{favored} -{handicap_line:.1f} {unit}（模型參考）"
                     else:
-                        handicap_text = f"讓分差距不足｜參考 {favored} -{handicap_line:g} {unit}"
+                        handicap_text = f"讓分差距不足｜參考 {favored} -{handicap_line:.1f} {unit}"
                     metrics = {"total": total_text, "handicap": handicap_text,
                                "expected_total": expected_total, "expected_margin": expected_margin}
                 selected_id = ids[0 if chosen == a else 1]
