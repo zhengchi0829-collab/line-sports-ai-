@@ -169,6 +169,26 @@ async def continuous_refresh(app):
                         except Exception as exc:
                             log.error("soccer_analysis_validation league=%s error=%s",
                                       label, type(exc).__name__)
+            if not getattr(app.state, "verified_stats_probe_done", False):
+                app.state.verified_stats_probe_done = True
+                checks = (("英超", "soccer_epl", "足球"),
+                          ("NBA", "basketball", "籃球"),
+                          ("MLB", "baseball", "棒球"))
+                for league, key, sport_name in checks:
+                    snapshot = app.state.controller.fixtures.last.get(key)
+                    if not snapshot or not snapshot.games:
+                        log.warning("verified_stats_probe league=%s result=no_games", league)
+                        continue
+                    game = snapshot.games[0]
+                    try:
+                        context = await app.state.controller.team_details(
+                            sport_name, game.home, game.away, league)
+                        log.info("verified_stats_probe league=%s form=%s roster=%s recommendation=%s",
+                                 league, "實際勝率" in context[0],
+                                 "球員" in context[1], bool(context[2]))
+                    except Exception as exc:
+                        log.error("verified_stats_probe league=%s exception=%s",
+                                  league, type(exc).__name__)
             log.info(
                 "background_refresh version=%s keys=%s failures=%s elapsed_ms=%d",
                 VERSION, len(REFRESH_KEYS), failures,
