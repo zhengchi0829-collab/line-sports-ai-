@@ -174,9 +174,12 @@ async def lifespan(app):
         yield
         probe.cancel()
         refresher.cancel()
-        for task in list(app.state.pending):
-            task.cancel()
-        await asyncio.gather(probe, refresher, *app.state.pending, return_exceptions=True)
+        active = list(app.state.pending)
+        if active:
+            done, unfinished = await asyncio.wait(active, timeout=4)
+            for task in unfinished:
+                task.cancel()
+        await asyncio.gather(probe, refresher, *active, return_exceptions=True)
         await app.state.controller.close()
     # Keep the existing LINE default rich menu. Recreating it on every deploy
     # needlessly downloads a large font and risks switching to an unfinished menu.
@@ -255,6 +258,7 @@ async def process_event(event, app):
     token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "").strip()
     payload = {"replyToken": event["replyToken"], "messages": messages[:5]}
     reply_ok = False
+    fallback_ok = False
     try:
         response = await app.state.line_client.post(
             "https://api.line.me/v2/bot/message/reply",
@@ -291,16 +295,17 @@ async def process_event(event, app):
             len(payload["messages"]),
         )
         if not reply_ok:
-            await _push_fallback(
+            fallback_ok = await _push_fallback(
                 event, app, token,
                 "剛剛的操作沒有成功送出回覆，系統已自動補送。請再點一次原本的按鈕。"
             )
     except httpx.HTTPError as exc:
         log.error("line_reply transport_error=%s", type(exc).__name__)
-        await _push_fallback(
+        fallback_ok = await _push_fallback(
             event, app, token,
             "剛剛 LINE 回覆連線失敗，系統已自動補送。請再點一次原本的按鈕。"
         )
+    return reply_ok or fallback_ok
 
 
 @app.post("/webhooks/line")
@@ -322,6 +327,7 @@ async def webhook(request: Request):
     if not isinstance(body, dict) or not isinstance(body.get("events"), list):
         raise HTTPException(400, "Invalid events")
     events = body["events"]
+    log.info("line_webhook_received version=%s events=%s", VERSION, len(events))
     if not events:
         return {"ok": True}
     if not os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "").strip():
@@ -345,21 +351,33 @@ async def webhook(request: Request):
             continue
         key = str(event.get("webhookEventId") or hashlib.sha256(reply_token.encode()).hexdigest())
         if key in seen:
+            log.info("line_webhook_duplicate kind=%s key=%s", kind, key[:12])
             continue
         if len(seen) >= 4096:
             seen.pop(next(iter(seen)))
-        seen[key] = now + 1200
+        seen[key] = now + 30
+        log.info("line_command_received version=%s kind=%s key=%s", VERSION, kind, key[:12])
         task = asyncio.create_task(process_event(event, app))
         app.state.pending.add(task)
-        def _done(done):
+        def _done(done, event_key=key):
             app.state.pending.discard(done)
             if done.cancelled():
+                seen.pop(event_key, None)
+                log.warning("line_event_canceled key=%s", event_key[:12])
                 return
             try:
-                exc = done.exception()
+                success = done.result()
             except asyncio.CancelledError:
+                seen.pop(event_key, None)
                 return
-            if exc:
+            except Exception as exc:
+                seen.pop(event_key, None)
                 log.error("event_task_unhandled kind=%s", type(exc).__name__)
+                return
+            if success:
+                seen[event_key] = time.monotonic() + 1200
+            else:
+                seen.pop(event_key, None)
+                log.warning("line_event_not_delivered key=%s", event_key[:12])
         task.add_done_callback(_done)
     return {"ok": True}
