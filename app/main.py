@@ -15,13 +15,15 @@ import logging
 import os
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 
 from . import legacy as ui
-from .reliability import Controller, Game, Snapshot, SPORTS, TZ, VERSION, fixture_cards, notice, quick_menu
+from .reliability import (Controller, Game, Snapshot, SPORTS, TZ, VERSION,
+                          fixture_cards, notice, quick_menu, date_category_menu,
+                          odds_category_menu, odds_source_card, select_games)
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
 log = logging.getLogger("sports_bot")
@@ -43,6 +45,19 @@ async def startup_probe(app):
             assert isinstance(card, dict) and card.get("type") == "flex"
             assert len(card["contents"]["body"]["contents"]) >= 3
             samples.append(card)
+        # Verify today's matches cannot leak into future, and vice versa.
+        check_now = datetime.now(TZ)
+        sample_today = Game("today-test", "soccer", "test", check_now, "Team A", "Team B")
+        sample_tomorrow = Game("tomorrow-test", "soccer", "test",
+                               check_now + timedelta(days=1), "Team C", "Team D")
+        assert [g.ident for g in select_games([sample_today, sample_tomorrow],
+                                                check_now, today=True)] == ["today-test"]
+        assert [g.ident for g in select_games([sample_today, sample_tomorrow],
+                                                check_now, future=True)] == ["tomorrow-test"]
+        for sport in SPORTS.values():
+            handicap_card = ui.offline_analysis(sport, "A vs B")
+            assert any("讓球" in str(row) for row in handicap_card["contents"]["body"]["contents"])
+        log.info("date_filter_checks=passed version=%s", VERSION)
         log.info("startup_ui_checks=passed version=%s", VERSION)
         token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "").strip()
         if token:
@@ -52,6 +67,16 @@ async def startup_probe(app):
                 headers=headers, json={"messages": samples})
             app.state.line_validation = response.status_code
             log.info("line_message_validation status=%s version=%s", response.status_code, VERSION)
+            new_cards = [date_category_menu("今日賽事"),
+                         date_category_menu("未來賽事"),
+                         odds_category_menu(), odds_source_card("台灣運彩賠率"),
+                         odds_source_card("娛樂平台賠率")]
+            checked = await app.state.line_client.post(
+                "https://api.line.me/v2/bot/message/validate/reply",
+                headers=headers, json={"messages": new_cards})
+            log.info("line_new_menus_validation status=%s version=%s", checked.status_code, VERSION)
+            if checked.status_code != 200:
+                log.warning("line_new_menus_detail %s", checked.text[:800])
             for sport, snap in zip(SPORTS, results):
                 if snap.games:
                     card = fixture_cards(sport, snap, ui.team_zh)

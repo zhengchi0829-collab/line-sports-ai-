@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.6.47"
+VERSION = "0.6.48"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -695,7 +695,7 @@ class Controller:
                 continue
             used.add(unique)
             selected = Snapshot([game], snap.fetched, snap.errors, snap.successes, snap.stale)
-            result = fixture_cards(key, selected, self.ui.team_zh, now=now)
+            result = fixture_cards(key, selected, self.ui.team_zh, today=(mode == TODAY), now=now)
             bubbles.extend(result["contents"].get("contents", []))
             if len(bubbles) >= 8:
                 break
