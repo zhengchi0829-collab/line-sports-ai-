@@ -415,7 +415,7 @@ def offline_analysis(sport, matchup=None, team_history=None, star_players=None, 
                 wins, draws, losses = (int(v) for v in match.groups())
                 picks.append(f"{who} {wins}勝{draws}和{losses}敗（{wins * 20}%）")
         if picks:
-            return "\\n".join(picks[:2])
+            return "\n".join(picks[:2])
         if "勝率" in str(value) and "勝" in str(value):
             return str(value).split("｜資料截至")[0][:100]
         return "近五場資料不足，暫無推薦"
@@ -425,7 +425,10 @@ def offline_analysis(sport, matchup=None, team_history=None, star_players=None, 
         source = str(value or "")
         if not source or any(key in source for key in
                              ("沒有可核實", "尚無可核實", "暫無可核實",
-                              "尚未核實", "未核實", "資料待核實", "資料不足")):
+                              "資料待核實", "資料不足")):
+            return "球員資料不足"
+        if "未核實" in source and not any(marker in source for marker in
+                                           ("登錄球員（", "現役登錄球員（", "登錄／先發")):
             return "球員資料不足"
         names = []
         for line in source.splitlines():
