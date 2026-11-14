@@ -1112,9 +1112,9 @@ def empty_state_card(title: str, message: str, *, category: str = "賽事",
          "spacing": "sm", "contents": [
             {"type": "box", "layout": "vertical", "width": "5px", "height": "8px",
              "backgroundColor": accent, "contents": []},
-            text("SYSTEM NAVIGATION", "xxs", "#67E8F9", "bold"),
+            text("SYSTEM NAVIGATION", "xs", "#67E8F9", "bold"),
             {"type": "filler"},
-            text("● ONLINE", "xxs", "#5EEAD4", "bold")]},
+            text("● ONLINE", "xs", "#5EEAD4", "bold")]},
         {"type": "separator", "margin": "sm", "color": "#155E75"},
     ]
     if retry:
