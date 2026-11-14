@@ -669,7 +669,7 @@ def odds_fixture_picker(provider: str, league: str, records: list[dict]) -> dict
             when = instant(start).astimezone(TZ).strftime("%m/%d %H:%M")
         except (ValueError, TypeError):
             when = str(start)[:16] or "時間未提供"
-        home = self_name = str(item.get("home") or "-")
+        home = str(item.get("home") or "-")
         away = str(item.get("away") or "-")
         command = f"賠率單場{origin}{league}#{index}"
         bubble = {
@@ -703,7 +703,7 @@ def odds_fixture_picker(provider: str, league: str, records: list[dict]) -> dict
 def odds_single_match_card(provider: str, league: str, item: dict) -> dict:
     """Show only the selected matchup with its verified API quote."""
     source = "娛樂平台" if provider == "platform" else "台灣運彩"
-    body_lines = format_book(item).split("\\n")
+    body_lines = format_book(item).split("\n")
     rows = [text(line, "sm", "#334155") for line in body_lines]
     rows.append(text("單次來源快照｜僅供資訊參考，非即時盤口",
                      "xs", "#64748B"))
