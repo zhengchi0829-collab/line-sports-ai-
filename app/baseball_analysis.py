@@ -427,7 +427,9 @@ async def verified_baseball_analysis(client, league, home, away, translate=None,
         coverage=("支持" if abs(expected_margin)>spread+0.3 else "差距不足")
         metrics={"total":f"{tendency} {model_line:.1f} 分（歷史模型參考）｜預估 {expected_total:.1f} 分",
                  "handicap":f"{favored} -{spread:.1f} 分（模型 {coverage}）",
-                 "expected_total":expected_total,"expected_margin":expected_margin}
+                 "expected_total":expected_total,"expected_margin":expected_margin,
+                 "form_rates": rates, "form_draw_rates": [r[1]/5 for r in records],
+                 "form_games": 5}
         async def fetch_roster(entry):
             try:
                 team, _ = entry
