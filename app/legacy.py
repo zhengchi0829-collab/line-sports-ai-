@@ -883,8 +883,7 @@ async def ensure_persistent_rich_menu():
     accent_colors = ("#21D4CA", "#38BDF8", "#A78BFA",
                      "#2DD4BF", "#60A5FA", "#94A3B8")
 
-    def render_menu():
-        from PIL import ImageColor
+    def render_menu(font_data=None):
         im = Image.new("RGB", (width, height), "#071522")
         draw = ImageDraw.Draw(im)
         font_candidates = (
@@ -894,6 +893,11 @@ async def ensure_persistent_rich_menu():
             "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
         )
         def cjk_font(size):
+            if font_data:
+                try:
+                    return ImageFont.truetype(io.BytesIO(font_data), size)
+                except (OSError, ValueError):
+                    pass
             for path in font_candidates:
                 try:
                     return ImageFont.truetype(path, size)
@@ -955,7 +959,21 @@ async def ensure_persistent_rich_menu():
             if not rich_id:
                 # Render before creating the menu so a missing font cannot leave
                 # an empty menu linked to users.
-                png=await run_in_threadpool(render_menu)
+                font_bytes = None
+                if not any(os.path.isfile(path) for path in (
+                        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+                        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+                        "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+                        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc")):
+                    try:
+                        font_resp = await client.get(
+                            "https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/OTF/TraditionalChinese/NotoSansCJKtc-Regular.otf",
+                            timeout=35)
+                        font_resp.raise_for_status()
+                        font_bytes = font_resp.content
+                    except httpx.HTTPError as font_exc:
+                        log.warning("Rich menu CJK font fetch failed: %s", type(font_exc).__name__)
+                png=await run_in_threadpool(render_menu, font_bytes)
                 payload={"size":{"width":width,"height":height},"selected":True,
                          "name":menu_name,"chatBarText":"⚡ 體育 AI｜科技選單",
                          "areas":areas}
