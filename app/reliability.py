@@ -754,7 +754,17 @@ def odds_single_match_card(provider: str, league: str, item: dict,
     original_matchup = str(item.get("home") or "-") + " vs " + str(item.get("away") or "-")
     translated_matchup = team_display(item.get("home") or "-") + " VS " + team_display(item.get("away") or "-")
     body_lines = [translated_matchup if line == original_matchup else line for line in body_lines]
-    rows = [text(line, "sm", "#334155") for line in body_lines]
+    # Subtle section icons exclusively in the final single-match odds card.
+    odds_icons = (
+        ("獨贏賠率", "🏆 "), ("盤口隱含機率", "📊 "),
+        ("大小盤", "📈 "), ("讓球／讓分", "⚖️ "),
+        ("盤口更新：", "🕒 "),
+    )
+    decorated = []
+    for line in body_lines:
+        prefix = next((emoji for label, emoji in odds_icons if line.startswith(label)), "")
+        decorated.append(prefix + line)
+    rows = [text(line, "sm", "#334155") for line in decorated]
     rows.append(text("當日賠率資料｜實際盤口以平台為準",
                      "xs", "#64748B"))
     return {"type": "flex", "altText": (league + "｜" + team_display(item.get("home") or "-") +
