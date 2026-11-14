@@ -1,9 +1,11 @@
 """Authorized sportsbook odds sources. Never claim model numbers are actual odds."""
 import asyncio
 import difflib
+import json
 import os
 import re
 import time
+from pathlib import Path
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -178,51 +180,122 @@ def format_book(book, predicted=None):
     return "\n".join(parts)
 
 class OddsGateway:
+    """Only one The Odds API lookup and one matchup per Taiwan day.
+
+    Filesystem cache avoids repeat charges during ordinary requests/restarts
+    on the same instance. Render free ephemeral disk can reset on redeploy;
+    a durable database is required for a strict cross-deployment quota.
+    """
     def __init__(self, client):
-        self.client=client
-        self.cache={}
-        self.locks={}
-        self.last_jbot_call=0.0
+        self.client = client
+        self.cache = {}
+        self.locks = {}
+        self.last_jbot_call = 0.0
+        self.daily_lock = asyncio.Lock()
+        self.daily_file = Path(os.getenv("ODDS_DAILY_CACHE_PATH", "/tmp/line_sports_odds_daily.json"))
+        self.daily = self._read_daily()
+
+    def _read_daily(self):
+        try:
+            data = json.loads(self.daily_file.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except (OSError, ValueError, TypeError):
+            return {}
+
+    def _save_daily(self, record):
+        """Commit an attempted call BEFORE the network request to avoid retries."""
+        try:
+            self.daily_file.parent.mkdir(parents=True, exist_ok=True)
+            path = self.daily_file.with_name(self.daily_file.name + ".tmp")
+            path.write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
+            path.replace(self.daily_file)
+            self.daily = record
+            return True
+        except OSError:
+            # Never spend paid API credits without being able to remember it.
+            return False
+
+    def daily_status(self, league):
+        day = datetime.now(TZ).strftime("%Y-%m-%d")
+        record = self.daily
+        if record.get("day") != day:
+            return "available"
+        if record.get("league") != league:
+            return "other_league"
+        if record.get("state") == "ready":
+            return "cached"
+        return "unavailable"
+
+    async def _daily_platform_feed(self, league):
+        day = datetime.now(TZ).strftime("%Y-%m-%d")
+        async with self.daily_lock:
+            record = self.daily
+            if record.get("day") == day:
+                return record.get("rows", []) if record.get("league") == league else []
+            sport = KEYS.get(league)
+            key = (os.getenv("ODDS_API_KEY") or os.getenv("THE_ODDS_API_KEY") or "").strip()
+            if not key or not sport:
+                return []
+            # This marker is stored before the request: even errors do not retry.
+            pending = {"day": day, "league": league, "state": "attempted", "rows": []}
+            if not self._save_daily(pending):
+                return []
+            rows = []
+            try:
+                response = await self.client.get(
+                    f"https://api.the-odds-api.com/v4/sports/{sport}/odds",
+                    params={"apiKey": key, "regions": "us",
+                            "markets": "h2h,spreads,totals", "oddsFormat": "decimal"},
+                    timeout=5,
+                )
+                if response.status_code == 200:
+                    all_rows = theodds_normalize(response.json())
+                    # A single matchup (not four unrelated games).
+                    if all_rows:
+                        first = all_rows[0]
+                        rows = [row for row in all_rows
+                                if row["home"] == first["home"]
+                                and row["away"] == first["away"]
+                                and row["start"] == first["start"]][:1]
+            except (httpx.HTTPError, ValueError, TypeError, KeyError):
+                rows = []
+            self._save_daily({"day": day, "league": league,
+                              "state": "ready" if rows else "unavailable",
+                              "rows": rows})
+            return rows
 
     async def feed(self, provider, league, date):
-        cache_key=(provider,league,date)
-        cache=self.cache.get(cache_key)
-        if cache and time.monotonic()-cache[0] < (300 if provider=="tw" else 1800):
+        if provider != "tw":
+            return await self._daily_platform_feed(league)
+        cache_key = (provider, league, date)
+        cache = self.cache.get(cache_key)
+        if cache and time.monotonic() - cache[0] < 300:
             return cache[1]
-        lock=self.locks.setdefault(cache_key,asyncio.Lock())
+        lock = self.locks.setdefault(cache_key, asyncio.Lock())
         async with lock:
-            cache=self.cache.get(cache_key)
-            if cache and time.monotonic()-cache[0] < (300 if provider=="tw" else 1800):
+            cache = self.cache.get(cache_key)
+            if cache and time.monotonic() - cache[0] < 300:
                 return cache[1]
-            data=[]
+            data = []
+            key = os.getenv("JBOT_API_TOKEN", "").strip()
+            kind = JSPORTS.get(league)
+            if not key or not kind:
+                return []
+            if time.monotonic() - self.last_jbot_call < 5.5:
+                return []
+            self.last_jbot_call = time.monotonic()
             try:
-                if provider=="tw":
-                    key=os.getenv("JBOT_API_TOKEN","").strip()
-                    kind=JSPORTS.get(league)
-                    if not key or not kind:return []
-                    # Licensed API: calls must be >5 seconds apart, no polling free trial tokens.
-                    if time.monotonic()-self.last_jbot_call < 5.5:return []
-                    self.last_jbot_call=time.monotonic()
-                    response=await self.client.get("https://api.sportsbot.tech/v2/odds",
-                        params={"sport":kind,"date":date,"mode":"close"},
-                        headers={"X-JBot-Token":key},timeout=5)
-                    if response.status_code==200:
-                        data=jbot_normalize(response.json())
-                else:
-                    key=(os.getenv("ODDS_API_KEY") or os.getenv("THE_ODDS_API_KEY") or "").strip()
-                    sport=KEYS.get(league)
-                    if not key or not sport:return []
-                    response=await self.client.get(
-                        f"https://api.the-odds-api.com/v4/sports/{sport}/odds",
-                        params={"apiKey":key,"regions":"us",
-                                "markets":"h2h,spreads,totals","oddsFormat":"decimal"},
-                        timeout=5)
-                    if response.status_code==200:
-                        data=theodds_normalize(response.json())
-            except (httpx.HTTPError,ValueError,TypeError,KeyError):
-                data=[]
+                response = await self.client.get(
+                    "https://api.sportsbot.tech/v2/odds",
+                    params={"sport": kind, "date": date, "mode": "close"},
+                    headers={"X-JBot-Token": key}, timeout=5,
+                )
+                if response.status_code == 200:
+                    data = jbot_normalize(response.json())
+            except (httpx.HTTPError, ValueError, TypeError, KeyError):
+                data = []
             if data:
-                self.cache[cache_key]=(time.monotonic(),data)
+                self.cache[cache_key] = (time.monotonic(), data)
             return data
 
     async def match(self, provider, league, home, away, kickoff, translate=None):
