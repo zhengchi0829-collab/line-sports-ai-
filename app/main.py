@@ -475,23 +475,24 @@ async def lifespan(app):
         dated_probe = asyncio.create_task(dated_flow_probe(app))
         webhook_probe = asyncio.create_task(verify_line_webhook(app))
         richmenu_probe = asyncio.create_task(inspect_line_rich_menu(app))
+        richmenu_setup = asyncio.create_task(ui.ensure_persistent_rich_menu())
         yield
         probe.cancel()
         refresher.cancel()
         dated_probe.cancel()
         webhook_probe.cancel()
         richmenu_probe.cancel()
+        richmenu_setup.cancel()
         active = list(app.state.pending)
         if active:
             done, unfinished = await asyncio.wait(active, timeout=4)
             for task in unfinished:
                 task.cancel()
         await asyncio.gather(probe, refresher, dated_probe, webhook_probe,
-                             richmenu_probe,
+                             richmenu_probe, richmenu_setup,
                              *active, return_exceptions=True)
         await app.state.controller.close()
-    # Keep the existing LINE default rich menu. Recreating it on every deploy
-    # needlessly downloads a large font and risks switching to an unfinished menu.
+    # Versioned rich menu is reused on subsequent deploys; old menu retained on failure.
 
 
 app = FastAPI(title="LINE Sports AI", version=VERSION, lifespan=lifespan)
