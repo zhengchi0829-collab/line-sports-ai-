@@ -147,6 +147,17 @@ def format_book(book, predicted=None):
         h=f"主 {book['home_price']:.2f}／客 {book['away_price']:.2f}"
         if book.get("draw_price"):h+=f"／和 {book['draw_price']:.2f}"
         parts.append("獨贏賠率 "+h)
+    # Market-implied probabilities, not model predictions.
+    choices=[("主",book.get("home_price")),("客",book.get("away_price"))]
+    if book.get("draw_price") is not None:
+        choices.append(("和",book["draw_price"]))
+    if all(isinstance(p,(int,float)) and p>1 for _,p in choices):
+        implied=[(label,1/p) for label,p in choices]
+        total_probability=sum(p for _,p in implied)
+        if total_probability>0:
+            parts.append("盤口隱含機率（去除抽水） "+
+                         "／".join(f"{label} {p/total_probability*100:.1f}%"
+                                  for label,p in implied))
     if book.get("total") is not None:
         line=book["total"]
         text=f"大小盤 {line:g}｜大 {book['over_price']:.2f}" if book.get("over_price") else f"大小盤 {line:g}"
@@ -176,12 +187,12 @@ class OddsGateway:
     async def feed(self, provider, league, date):
         cache_key=(provider,league,date)
         cache=self.cache.get(cache_key)
-        if cache and time.monotonic()-cache[0] < (300 if provider=="tw" else 120):
+        if cache and time.monotonic()-cache[0] < (300 if provider=="tw" else 1800):
             return cache[1]
         lock=self.locks.setdefault(cache_key,asyncio.Lock())
         async with lock:
             cache=self.cache.get(cache_key)
-            if cache and time.monotonic()-cache[0] < (300 if provider=="tw" else 120):
+            if cache and time.monotonic()-cache[0] < (300 if provider=="tw" else 1800):
                 return cache[1]
             data=[]
             try:
@@ -198,12 +209,12 @@ class OddsGateway:
                     if response.status_code==200:
                         data=jbot_normalize(response.json())
                 else:
-                    key=os.getenv("THE_ODDS_API_KEY","").strip()
+                    key=(os.getenv("ODDS_API_KEY") or os.getenv("THE_ODDS_API_KEY") or "").strip()
                     sport=KEYS.get(league)
                     if not key or not sport:return []
                     response=await self.client.get(
                         f"https://api.the-odds-api.com/v4/sports/{sport}/odds",
-                        params={"apiKey":key,"regions":"us,uk,eu,au",
+                        params={"apiKey":key,"regions":"us",
                                 "markets":"h2h,spreads,totals","oddsFormat":"decimal"},
                         timeout=5)
                     if response.status_code==200:
