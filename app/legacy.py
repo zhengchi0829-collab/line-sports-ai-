@@ -859,79 +859,126 @@ async def reply_for(text):
     return MENU
 
 async def ensure_persistent_rich_menu():
-    """Install a persistent LINE rich menu once, reusing the menu across restarts."""
-    token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "")
+    """Create the six-button sci-fi LINE rich menu once, then set as default.
+
+    A new versioned name makes the design change explicit. Subsequent restarts
+    reuse the existing menu; the previous default is not deleted.
+    """
+    token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "").strip()
     if not token:
         log.warning("Rich menu skipped: LINE access token missing")
-        return
+        return False
     import io
     from PIL import Image, ImageDraw, ImageFont
     from fastapi.concurrency import run_in_threadpool
 
-    def render_menu(font_data=None):
-        image = Image.new("RGB", (1200, 405), "#0B1220")
-        draw = ImageDraw.Draw(image)
-        try:
-            font = ImageFont.truetype(io.BytesIO(font_data), 43) if font_data else ImageFont.truetype("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", 43)
-        except (OSError, ValueError):
-            font = ImageFont.truetype("DejaVuSans-Bold.ttf", 40)
-        tiles = [("足球", "#0F766E"), ("籃球", "#C2410C"),
-                 ("棒球", "#4F46E5"), ("今日賽事", "#1D4ED8"),
-                 ("未來賽事", "#334155"), ("主選單", "#334155")]
-        for index, (label, color) in enumerate(tiles):
-            x, y = (index % 3) * 400, (index // 3) * 202
-            draw.rounded_rectangle((x + 7, y + 6, x + 393, y + 196), radius=18, fill=color)
-            bbox = draw.textbbox((0, 0), label, font=font)
-            draw.text((x + (400 - (bbox[2] - bbox[0])) / 2,
-                       y + (202 - (bbox[3] - bbox[1])) / 2 - bbox[1]),
-                      label, font=font, fill="white")
-        out = io.BytesIO()
-        image.save(out, format="PNG")
-        return out.getvalue()
+    menu_name = "Sports AI Sci-Fi Rich Menu v1"
+    width, height = 2500, 843
+    col_edges = (0, 833, 1667, 2500)
+    row_edges = (0, 421, 843)
+    labels = ["足球", "籃球", "棒球", "今日賽事", "未來賽事", "主選單"]
+    commands = ["足球", "籃球", "棒球", "今日賽事", "未來賽事", "選單"]
+    symbols = ["01 / FOOTBALL", "02 / BASKETBALL", "03 / BASEBALL",
+               "04 / TODAY", "05 / UPCOMING", "06 / HOME"]
+    accent_colors = ("#21D4CA", "#38BDF8", "#A78BFA",
+                     "#2DD4BF", "#60A5FA", "#94A3B8")
 
-    labels = ["足球", "籃球", "棒球", "今日賽事", "未來賽事", "選單"]
-    areas = [{"bounds": {"x": (i % 3) * 400, "y": (i // 3) * 202,
-                         "width": 400, "height": 202 if i < 3 else 203},
-              "action": {"type": "message", "label": label, "text": label}}
-             for i, label in enumerate(labels)]
-
-    headers = {"Authorization": f"Bearer {token}"}
-    async with httpx.AsyncClient(timeout=15) as client:
-        try:
-            existing = await client.get("https://api.line.me/v2/bot/richmenu/list", headers=headers)
-            existing.raise_for_status()
-            for menu in existing.json().get("richmenus", []):
-                if menu.get("name") == "Sports AI Persistent Menu v0.6.18":
-                    rich_id = menu["richMenuId"]
-                    break
-            else:
-                payload = {"size": {"width": 1200, "height": 405},
-                           "selected": True, "name": "Sports AI Persistent Menu v0.6.18",
-                           "chatBarText": "⚽ 體育賽事快捷選單", "areas": areas}
-                created = await client.post("https://api.line.me/v2/bot/richmenu",
-                                            headers=headers, json=payload)
-                created.raise_for_status()
-                rich_id = created.json()["richMenuId"]
-                font_data = None
+    def render_menu():
+        from PIL import ImageColor
+        im = Image.new("RGB", (width, height), "#071522")
+        draw = ImageDraw.Draw(im)
+        font_candidates = (
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+            "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+        )
+        def cjk_font(size):
+            for path in font_candidates:
                 try:
-                    font_response = await client.get(
-                        "https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/OTF/TraditionalChinese/NotoSansCJKtc-Regular.otf",
-                        timeout=45)
-                    font_response.raise_for_status()
-                    font_data = font_response.content
-                except httpx.HTTPError as font_exc:
-                    log.warning("Chinese menu font download failed: %s", str(font_exc)[:120])
-                png = await run_in_threadpool(render_menu, font_data)
-                upload = await client.post(
-                    f"https://api-data.line.me/v2/bot/richmenu/{rich_id}/content",
-                    headers={**headers, "Content-Type": "image/png"}, content=png)
+                    return ImageFont.truetype(path, size)
+                except (OSError, ValueError):
+                    pass
+            # Pillow's default may not have CJK: avoid uploading tofu text.
+            raise RuntimeError("CJK font missing; previous rich menu remains active")
+
+        headline = cjk_font(94)
+        small = ImageFont.truetype("DejaVuSans.ttf", 31)
+        for index, (label, accent) in enumerate(zip(labels, accent_colors)):
+            x0, x1 = col_edges[index % 3], col_edges[index % 3 + 1]
+            y0, y1 = row_edges[index // 3], row_edges[index // 3 + 1]
+            margin = 13
+            left, top, right, bottom = x0+margin, y0+margin, x1-margin, y1-margin
+            draw.rounded_rectangle((left, top, right, bottom),
+                                   radius=27, fill="#0F2437", outline="#29455B", width=3)
+            draw.rounded_rectangle((left+17, top+17, right-17, bottom-17),
+                                   radius=22, outline="#1A374C", width=2)
+            # Neon accent rail and angular UI details.
+            draw.rounded_rectangle((left+32, top+27, right-32, top+36),
+                                   radius=4, fill=accent)
+            draw.line((left+33, top+81, left+72, top+81, left+90, top+99),
+                      fill=accent, width=4)
+            draw.line((right-33, bottom-57, right-95, bottom-57,
+                       right-111, bottom-73), fill=accent, width=3)
+            draw.line((left+33, bottom-57, left+88, bottom-57),
+                      fill="#36566C", width=3)
+            for dot in range(4):
+                px=right-51-dot*24
+                draw.ellipse((px-5,top+70,px+5,top+80),fill=accent if dot==0 else "#305166")
+            heading_box=draw.textbbox((0, 0), label, font=headline)
+            tx=(x0+x1-(heading_box[2]-heading_box[0]))/2
+            ty=(y0+y1-(heading_box[3]-heading_box[1]))/2 - heading_box[1] - 8
+            draw.text((tx+2,ty+3),label,font=headline,fill="#164457")
+            draw.text((tx,ty),label,font=headline,fill="#F2FBFF")
+            sx=left+39
+            draw.text((sx,bottom-94),symbols[index],font=small,fill=accent)
+        output=io.BytesIO()
+        im.save(output,format="PNG",optimize=True)
+        if output.tell() > 1024*1024:
+            raise RuntimeError("Rich menu PNG exceeds LINE's 1 MB limit")
+        return output.getvalue()
+
+    areas = []
+    for i, label in enumerate(labels):
+        x0,x1 = col_edges[i%3], col_edges[i%3+1]
+        y0,y1 = row_edges[i//3], row_edges[i//3+1]
+        areas.append({"bounds":{"x":x0,"y":y0,"width":x1-x0,"height":y1-y0},
+                      "action":{"type":"message","label":label,"text":commands[i]}})
+    headers={"Authorization":"Bearer "+token}
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15, connect=4)) as client:
+            existing=await client.get("https://api.line.me/v2/bot/richmenu/list",
+                                      headers=headers)
+            existing.raise_for_status()
+            rich_id=next((m.get("richMenuId") for m in existing.json().get("richmenus",[])
+                          if m.get("name")==menu_name),None)
+            if not rich_id:
+                # Render before creating the menu so a missing font cannot leave
+                # an empty menu linked to users.
+                png=await run_in_threadpool(render_menu)
+                payload={"size":{"width":width,"height":height},"selected":True,
+                         "name":menu_name,"chatBarText":"⚡ 體育 AI｜科技選單",
+                         "areas":areas}
+                created=await client.post("https://api.line.me/v2/bot/richmenu",
+                                          headers=headers,json=payload)
+                created.raise_for_status()
+                rich_id=created.json()["richMenuId"]
+                upload=await client.post(
+                    "https://api-data.line.me/v2/bot/richmenu/"+rich_id+"/content",
+                    headers={**headers,"Content-Type":"image/png"},content=png)
                 upload.raise_for_status()
-            set_default = await client.post(
-                f"https://api.line.me/v2/bot/user/all/richmenu/{rich_id}", headers=headers)
-            set_default.raise_for_status()
-            log.info("Persistent rich menu configured: %s", rich_id)
-        except (httpx.HTTPError, ValueError, KeyError) as exc:
-            log.error("Persistent rich menu setup failed: %s", str(exc)[:300])
+            result=await client.post(
+                "https://api.line.me/v2/bot/user/all/richmenu/"+rich_id,
+                headers=headers)
+            result.raise_for_status()
+            log.info("Sci-fi rich menu configured id=%s reused=%s",
+                     rich_id, "yes" if existing and any(
+                         m.get("name")==menu_name for m in existing.json().get("richmenus",[]))
+                         else "no")
+            return True
+    except (httpx.HTTPError, ValueError, KeyError, RuntimeError, OSError) as exc:
+        log.error("Sci-fi rich menu setup failed: %s",str(exc)[:350])
+        return False
 
 
 @app.on_event("startup")
