@@ -12,6 +12,7 @@ import hashlib
 import math
 from .baseball_analysis import verified_baseball_analysis
 from .legacy import team_display
+from .team_names import chinese_name
 import logging
 import re
 import time
@@ -658,24 +659,83 @@ def date_league_menu(mode: str, category: str, selected: date) -> dict:
 
 
 
+NBA_LOGO_IDS = {
+    "Atlanta Hawks": 1610612737, "Boston Celtics": 1610612738,
+    "Brooklyn Nets": 1610612751, "Charlotte Hornets": 1610612766,
+    "Chicago Bulls": 1610612741, "Cleveland Cavaliers": 1610612739,
+    "Dallas Mavericks": 1610612742, "Denver Nuggets": 1610612743,
+    "Detroit Pistons": 1610612765, "Golden State Warriors": 1610612744,
+    "Houston Rockets": 1610612745, "Indiana Pacers": 1610612754,
+    "LA Clippers": 1610612746, "Los Angeles Clippers": 1610612746,
+    "Los Angeles Lakers": 1610612747, "Memphis Grizzlies": 1610612763,
+    "Miami Heat": 1610612748, "Milwaukee Bucks": 1610612749,
+    "Minnesota Timberwolves": 1610612750, "New Orleans Pelicans": 1610612740,
+    "New York Knicks": 1610612752, "Oklahoma City Thunder": 1610612760,
+    "Orlando Magic": 1610612753, "Philadelphia 76ers": 1610612755,
+    "Phoenix Suns": 1610612756, "Portland Trail Blazers": 1610612757,
+    "Sacramento Kings": 1610612758, "San Antonio Spurs": 1610612759,
+    "Toronto Raptors": 1610612761, "Utah Jazz": 1610612762,
+    "Washington Wizards": 1610612764,
+}
+MLB_LOGO_IDS = {
+    "Los Angeles Angels": 108, "Arizona Diamondbacks": 109,
+    "Baltimore Orioles": 110, "Boston Red Sox": 111,
+    "Chicago Cubs": 112, "Cincinnati Reds": 113,
+    "Cleveland Guardians": 114, "Colorado Rockies": 115,
+    "Detroit Tigers": 116, "Houston Astros": 117,
+    "Kansas City Royals": 118, "Los Angeles Dodgers": 119,
+    "Washington Nationals": 120, "New York Mets": 121,
+    "Athletics": 133, "Oakland Athletics": 133,
+    "Pittsburgh Pirates": 134, "San Diego Padres": 135,
+    "Seattle Mariners": 136, "San Francisco Giants": 137,
+    "St. Louis Cardinals": 138, "Tampa Bay Rays": 139,
+    "Texas Rangers": 140, "Toronto Blue Jays": 141,
+    "Minnesota Twins": 142, "Philadelphia Phillies": 143,
+    "Atlanta Braves": 144, "Chicago White Sox": 145,
+    "Miami Marlins": 146, "New York Yankees": 147,
+    "Milwaukee Brewers": 158,
+}
+
+
+def logo_key(name: str) -> str:
+    return re.sub(r"[^\w]", "", str(name or "")).casefold()
+
+
+def official_logo(league: str, team: str) -> str:
+    source = NBA_LOGO_IDS if league == "NBA" else MLB_LOGO_IDS if league == "MLB" else {}
+    wanted = {logo_key(team), logo_key(chinese_name(team))}
+    for name, ident in source.items():
+        if wanted & {logo_key(name), logo_key(chinese_name(name))}:
+            return (f"https://cdn.nba.com/logos/nba/{ident}/primary/L/logo.svg"
+                    if league == "NBA" else
+                    f"https://www.mlbstatic.com/team-logos/{ident}.svg")
+    return ""
+
+
+def register_logo(logos: dict, name: str, url: str) -> None:
+    if isinstance(url, str) and url.startswith("https://"):
+        for alias in (name, chinese_name(name)):
+            if alias:
+                logos.setdefault(logo_key(alias), url)
+
+
 def odds_logo_lookup(fixtures, league: str) -> dict[str, str]:
-    """Reuse verified fixture-provider team logos; do not guess from odds names."""
-    source_key = {
-        "NBA": "basketball", "NCAA": "basketball_ncaa",
-        "NBL": "basketball_nbl", "TPBL": "basketball_tpbl",
-        "MLB": "baseball", "NPB": "baseball_npb",
-        "KBO": "baseball_kbo", "CPBL": "baseball_cpbl",
-        "MiLB": "baseball_milb",
-        **{name: pair[0] for name, pair in SOCCER_LEAGUES.items()},
-    }.get(league)
-    snap = fixtures.last.get(source_key) if source_key else None
+    """Verified match feeds plus official IDs for NBA and MLB."""
+    source_key = {"NBA":"basketball", "NCAA":"basketball_ncaa",
+        "NBL":"basketball_nbl", "TPBL":"basketball_tpbl",
+        "MLB":"baseball", "NPB":"baseball_npb", "KBO":"baseball_kbo",
+        "CPBL":"baseball_cpbl", "MiLB":"baseball_milb",
+        **{name: pair[0] for name, pair in SOCCER_LEAGUES.items()}}.get(league)
     logos = {}
-    if snap:
-        for game in snap.games:
-            for raw, current in ((game.home, game.home_logo), (game.away, game.away_logo)):
-                logo = fallback_team_logo(source_key, raw, current)
-                if isinstance(logo, str) and logo.startswith("https://"):
-                    logos.setdefault(re.sub(r"[^\w]", "", str(raw)).casefold(), logo)
+    for name in (NBA_LOGO_IDS if league == "NBA" else
+                 MLB_LOGO_IDS if league == "MLB" else {}):
+        register_logo(logos, name, official_logo(league, name))
+    snapshot = fixtures.last.get(source_key) if source_key else None
+    if snapshot:
+        for game in snapshot.games:
+            for team, image in ((game.home, game.home_logo),
+                                (game.away, game.away_logo)):
+                register_logo(logos, team, fallback_team_logo(source_key, team, image))
     return logos
 
 
@@ -699,7 +759,7 @@ def odds_team_row(name: str, logo: str, role: str) -> dict:
 
 
 def odds_team_logo(logos: dict[str, str], original: str) -> str:
-    return logos.get(re.sub(r"[^\w]", "", str(original)).casefold(), "")
+    return logos.get(logo_key(original)) or logos.get(logo_key(chinese_name(original))) or ""
 
 
 def odds_fixture_picker(provider: str, league: str, records: list[dict], logos: dict[str, str] | None = None) -> dict:
@@ -1012,6 +1072,10 @@ def fallback_team_logo(sport: str, raw_name: str, current: str = "") -> str:
     if isinstance(current, str) and current.startswith("https://"):
         return current
     name = str(raw_name).strip()
+    league = "NBA" if sport == "basketball" else "MLB" if sport == "baseball" else ""
+    known = official_logo(league, name)
+    if known:
+        return known
     if sport == "baseball_cpbl":
         domain = CPBL_TEAM_DOMAINS.get(name)
         if domain:
