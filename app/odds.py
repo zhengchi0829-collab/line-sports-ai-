@@ -179,6 +179,84 @@ def format_book(book, predicted=None):
     if book.get("updated"):parts.append("盤口更新："+book["updated"][:19])
     return "\n".join(parts)
 
+# Read-only public Blob format documented by community projects. Not an
+# authenticated or guaranteed official API. Never bypass a blocked response.
+BLOB_SPORTS = {"NBA": 442, "MLB": 443}
+
+
+def sportslottery_blob_normalize(payload, league):
+    """Conservatively parse verified team IDs and explicit numeric outcomes."""
+    if isinstance(payload, dict):
+        data = payload.get("result", payload)
+        if isinstance(data, dict):
+            payload = data.get("registerOn") or data.get("liveOn") or []
+    if not isinstance(payload, list):
+        return []
+    records = []
+    for event in payload:
+        if not isinstance(event, dict) or event.get("si") is None:
+            continue
+        try:
+            if int(event["si"]) != BLOB_SPORTS.get(league):
+                continue
+        except (ValueError, TypeError):
+            continue
+        home = event.get("htn")
+        away = event.get("atn")
+        home = home[0] if isinstance(home, list) and home else home
+        away = away[0] if isinstance(away, list) and away else away
+        if not isinstance(home, str) or not isinstance(away, str) or not home or not away:
+            continue
+        try:
+            start = datetime.fromtimestamp(int(event["kdt"]) / 1000, timezone.utc).isoformat()
+        except (TypeError, ValueError, OSError, KeyError):
+            continue
+        row = {"source": "台灣運彩公開資料（未授權 API）", "book": "台灣運彩",
+               "home": home, "away": away, "start": start,
+               "updated": "", "home_price": None, "away_price": None,
+               "draw_price": None, "spread": None, "spread_home_price": None,
+               "spread_away_price": None, "total": None,
+               "over_price": None, "under_price": None}
+        for market in event.get("ms") or []:
+            if not isinstance(market, dict):
+                continue
+            try:
+                kind = int(market.get("id"))
+            except (TypeError, ValueError):
+                continue
+            for group in market.get("cs") or []:
+                if not isinstance(group, list):
+                    continue
+                bypos = {}
+                for cell in group:
+                    if isinstance(cell, dict):
+                        try:
+                            pos = int(cell.get("p"))
+                        except (ValueError, TypeError):
+                            continue
+                        price = number(cell.get("o"))
+                        if price is not None and price > 1:
+                            bypos[pos] = (price, number(cell.get("h")))
+                if kind == 1 and 1 in bypos and (3 in bypos or len(bypos) == 2):
+                    # Do not assume 1/2 positions mean home/away in a
+                    # three-way sport. Limit to NBA/MLB 2-way markets.
+                    if len(bypos) == 2:
+                        second = 3 if 3 in bypos else 2
+                        row["home_price"], row["away_price"] = bypos[1][0], bypos[second][0]
+                elif kind == 3 and 1 in bypos and 3 in bypos:
+                    h, a = bypos[1], bypos[3]
+                    if h[1] is not None and a[1] is not None and abs(h[1] + a[1]) < .01:
+                        row["spread"], row["spread_home_price"], row["spread_away_price"] = h[1], h[0], a[0]
+                elif kind == 5 and len(bypos) == 2:
+                    first, second = sorted(bypos)
+                    over, under = bypos[first], bypos[second]
+                    if over[1] is not None and under[1] is not None and abs(over[1] - under[1]) < .01:
+                        row["total"], row["over_price"], row["under_price"] = over[1], over[0], under[0]
+        if any(row[k] is not None for k in ("home_price", "spread", "total")):
+            records.append(row)
+    return records
+
+
 class OddsGateway:
     """Only one The Odds API lookup per Taiwan day, caching all returned fixtures.
 
@@ -194,6 +272,7 @@ class OddsGateway:
         self.daily_lock = asyncio.Lock()
         self.daily_file = Path(os.getenv("ODDS_DAILY_CACHE_PATH", "/tmp/line_sports_odds_daily.json"))
         self.daily = self._read_daily()
+        self.public_blob_cache = {}
 
     def _read_daily(self):
         try:
@@ -309,6 +388,35 @@ class OddsGateway:
             self._save_daily(result)
             return leagues.get(league, [])
 
+    async def _public_blob_feed(self, league, date):
+        """One daily attempt for publicly reachable data, never bypass 403."""
+        key = (league, date)
+        cached = self.public_blob_cache.get(key)
+        if cached is not None:
+            return cached
+        if league not in BLOB_SPORTS:
+            return []
+        output = []
+        # Explicitly public locations; no cookies, tokens, browser spoofing,
+        # proxy rotation, or retry on forbidden responses.
+        for path in ("Register/On.json", "Live/On.json"):
+            try:
+                resp = await self.client.get(
+                    "https://blob.sportslottery.com.tw/apidata/" + path,
+                    headers={"Accept": "application/json"}, timeout=5)
+                if resp.status_code in (401, 403):
+                    break
+                if resp.status_code != 200:
+                    continue
+                payload = resp.json()
+                output = sportslottery_blob_normalize(payload, league)
+                if output:
+                    break
+            except (httpx.HTTPError, ValueError, TypeError):
+                continue
+        self.public_blob_cache[key] = output
+        return output
+
     async def feed(self, provider, league, date):
         if provider != "tw":
             return await self._daily_platform_feed(league)
@@ -324,8 +432,10 @@ class OddsGateway:
             data = []
             key = os.getenv("JBOT_API_TOKEN", "").strip()
             kind = JSPORTS.get(league)
-            if not key or not kind:
+            if not kind:
                 return []
+            if not key:
+                return await self._public_blob_feed(league, date)
             if time.monotonic() - self.last_jbot_call < 5.5:
                 return []
             self.last_jbot_call = time.monotonic()
