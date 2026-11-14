@@ -1793,34 +1793,24 @@ class Controller:
                                 header_contents.append(
                                     text("按該場日期分析｜歷史戰績不代表預測勝率",
                                          "xs", "#CBD5E1"))
-                    if soccer_league and not demo and not requested_date:
-                        fixture_key = SOCCER_LEAGUES[soccer_league][0]
-                        snapshot = self.fixtures.last.get(fixture_key)
-                        if snapshot is not None:
-                            for game in snapshot.games:
-                                norm = lambda n: re.sub(r"[^\w]", "", str(n)).casefold()
-                                requested = {norm(a), norm(b)}
-                                localized = {norm(self.ui.team_zh(game.home)), norm(self.ui.team_zh(game.away))}
-                                original = {norm(game.home), norm(game.away)}
-                                if requested == localized or requested == original:
-                                    header = card["contents"]["header"]["contents"]
-                                    header.append(text("🕒 台灣時間 " + game.start.strftime("%m/%d %H:%M"), "xs", "#CBD5E1"))
-                                    logos = [(game.home, game.home_logo), (game.away, game.away_logo)]
-                                    pictures = []
-                                    for title, logo in logos:
-                                        if isinstance(logo, str) and logo.startswith("https://"):
-                                            pictures.append({"type": "image",
-                                                "url": "https://wsrv.nl/?url=" + quote(logo, safe="") +
-                                                       "&w=100&h=100&fit=contain&output=png",
-                                                "size": "38px", "aspectRatio": "1:1", "aspectMode": "fit",
-                                                "flex": 0})
-                                        else:
-                                            pictures.append(text(self.ui.team_zh(title)[:4], "sm", "#334155"))
-                                    card["contents"]["body"]["contents"].insert(
-                                        0, {"type": "box", "layout": "horizontal", "alignItems": "center",
-                                            "justifyContent": "center", "spacing": "lg",
-                                            "contents": pictures})
-                                    break
+                    # Render team logos for every analysis league and date.
+                    # Only use authenticated fixture-source identity or known
+                    # official team IDs; do not infer a logo from a similar name.
+                    logo_map = odds_logo_lookup(self.fixtures, league or
+                        ("NBA" if base_sport == "籃球" else
+                         "MLB" if base_sport == "棒球" else ""))
+                    if matched_game:
+                        register_logo(logo_map, matched_game.home,
+                                      matched_game.home_logo)
+                        register_logo(logo_map, matched_game.away,
+                                      matched_game.away_logo)
+                    home_logo = odds_team_logo(logo_map, a)
+                    away_logo = odds_team_logo(logo_map, b)
+                    card["contents"]["body"]["contents"].insert(
+                        0, {"type": "box", "layout": "vertical",
+                            "spacing": "sm", "contents": [
+                                odds_team_row(self.ui.team_zh(a), home_logo, "主隊"),
+                                odds_team_row(self.ui.team_zh(b), away_logo, "客隊")]})
                     # Keep title to actual date/time and two short Chinese team names.
                     event_time = matched_game.start if matched_game else kickoff
                     stamp = (event_time.strftime("%Y/%m/%d %H:%M")
