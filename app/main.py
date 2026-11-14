@@ -345,13 +345,31 @@ async def continuous_refresh(app):
                     if snap and snap.games:
                         names = sorted({name for game in snap.games
                                         for name in (game.home, game.away)})
-                        missing = [name for name in names if ui.team_display(name) == name]
+                        # Already-Chinese names do not need translation.
+                        def needs_chinese(name):
+                            if not any("a" <= ch.lower() <= "z" for ch in name):
+                                return False
+                            return ui.team_display(name) == name
+                        missing = [name for name in names if needs_chinese(name)]
                         log.info("team_translation_coverage league=%s translated=%s total=%s missing=%s",
                                  key, len(names) - len(missing), len(names), missing[:16])
-                        if key == "basketball_ncaa" and missing:
+                        if missing:
                             for offset in range(0, len(missing), 24):
-                                log.info("ncaa_name_gap group=%s names=%s",
-                                         offset // 24, missing[offset:offset + 24])
+                                log.info("team_name_gap league=%s group=%s names=%s",
+                                         key, offset // 24, missing[offset:offset + 24])
+                        # Source metadata coverage is not an image-load test;
+                        # log gaps separately so a missing URL is not confused
+                        # with a missing Chinese-name mapping.
+                        no_logo = sorted({name for game in snap.games
+                            for name, url in ((game.home, game.home_logo),
+                                              (game.away, game.away_logo))
+                            if not (isinstance(url, str) and url.startswith("https://"))})
+                        log.info("team_logo_source_coverage league=%s present=%s total=%s missing=%s",
+                                 key, len(names) - len(no_logo), len(names), no_logo[:16])
+                        if no_logo:
+                            for offset in range(0, len(no_logo), 24):
+                                log.info("team_logo_gap league=%s group=%s names=%s",
+                                         key, offset // 24, no_logo[offset:offset + 24])
             # Once per startup, validate real soccer fixture and analysis cards
             # against the LINE payload schema; this sends no user-facing messages.
             if not app.state.soccer_validation_done:
