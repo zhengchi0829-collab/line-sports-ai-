@@ -1098,42 +1098,56 @@ def baseball_menu() -> dict:
 
 
 
+def empty_state_card(title: str, message: str, *, category: str = "賽事",
+                     error: bool = False, back: str = MENU,
+                     retry: str | None = None) -> dict:
+    """Shared dark-tech LINE flex design for missing results and unavailable feeds."""
+    accent = "#D97706" if error else "#0D9488"
+    status = "來源狀態" if error else "暫無資料"
+    icon = "⚠️" if error else "📭"
+    actions = []
+    if retry:
+        actions.append(button("🔄 重新查詢", retry, accent))
+    actions.append(button("↩ 返回" + ("賠率選單" if category == "賠率" else "主選單"),
+                          back, "#334155"))
+    return {"type": "flex", "altText": (title + "｜" + status)[:400],
+            "quickReply": quick_menu(),
+            "contents": {"type": "bubble", "size": "kilo",
+                "header": {"type": "box", "layout": "vertical", "spacing": "sm",
+                           "backgroundColor": "#0F172A", "paddingAll": "16px",
+                           "contents": [text("📊 " + title, "lg", "#FFFFFF", "bold"),
+                                        text(category + "｜" + status, "sm", "#CBD5E1")]},
+                "body": {"type": "box", "layout": "vertical", "spacing": "md",
+                         "paddingAll": "16px", "contents": [
+                             {"type": "box", "layout": "horizontal", "spacing": "sm",
+                              "alignItems": "center", "contents": [
+                                 {"type": "box", "layout": "vertical", "width": "5px",
+                                  "height": "46px", "backgroundColor": accent,
+                                  "contents": []},
+                                 {"type": "box", "layout": "vertical", "flex": 1,
+                                  "spacing": "sm", "contents": [
+                                      text(icon + " " + status, "md", "#0F172A", "bold"),
+                                      text(message, "sm", "#475569")]}]},
+                             text("資料更新後即可重新查詢", "xs", "#64748B")]},
+                "footer": {"type": "box", "layout": "vertical", "spacing": "sm",
+                           "paddingAll": "12px", "contents": actions}}}
+
+
 def notice(sport: str, snapshot: Snapshot) -> dict:
     if sport.startswith("baseball"):
-        league = BASEBALL_LEAGUE_LABELS.get(sport, "MLB")
-        info = ("目前無即將開賽的賽程；仍可查詢歷史五場分析。"
-                if not snapshot.errors else
-                "賽程資料暫時無法連線；可手動輸入球隊進行歷史五場分析。")
-        return {"type":"flex","altText":league+"｜棒球賽程與分析",
-                "quickReply":quick_menu(),
-                "contents":{"type":"bubble","size":"kilo",
-                    "header":{"type":"box","layout":"vertical","backgroundColor":"#0F172A",
-                        "contents":[text("⚾ "+league,"lg","#FFFFFF","bold")]},
-                    "body":{"type":"box","layout":"vertical","spacing":"md",
-                        "contents":[text(info),text("輸入格式：分析"+league+" 主隊 vs 客隊","sm"),
-                                    text("僅使用該聯盟已核實的歷史比分，資料不足不虛構推薦。","xs")]},
-                    "footer":{"type":"box","layout":"vertical","spacing":"sm",
-                        "contents":[button("📅 查詢今日聯盟賽事", TODAY + league, "#0F766E"),
-                                    button("📆 指定日期賽事", SPECIFIED, "#7C3AED"),
-                                    button("🔄 查詢近期賽程", league, "#334155"),
-                                    button("⚾ 返回棒球分類", "棒球", "#334155")]}}}
-    name = SOCCER_LEAGUE_LABELS.get(sport) or SPORTS.get(sport, "\u8cfd\u4e8b")
-    failed = bool(snapshot.errors)
-    a, b = DEMO_PAIRS.get(sport, DEMO_PAIRS["soccer"])
-    demo = "\u6a21\u64ec\u5206\u6790" + SPORTS.get(sport, SPORTS["soccer"]) + " " + a + " vs " + b
-    detail = ("\u8cc7\u6599\u4f86\u6e90\u66ab\u6642\u7121\u6cd5\u9023\u7dda\uff0c\u4e26\u4e0d\u4ee3\u8868\u6c92\u6709\u6bd4\u8cfd\u3002" if failed else
-              "\u4f86\u6e90\u5df2\u56de\u61c9\uff0c\u76ee\u524d\u672a\u6536\u9304\u65b0\u7684\u672a\u958b\u8cfd\u8cfd\u7a0b\u3002")
-    if sport in SOCCER_LEAGUE_LABELS:
-        demo = "模擬分析" + name + " 曼城 vs 利物浦"
-        detail += "\n可輸入「分析" + name + " 主隊 vs 客隊」進行指定對戰情境分析。"
-
-    return {"type": "flex", "altText": name + "\u8cfd\u7a0b\u72c0\u614b", "quickReply": quick_menu(),
-            "contents": {"type": "bubble", "size": "kilo",
-             "body": {"type": "box", "layout": "vertical", "spacing": "md",
-                      "contents": [text(name + "\u8cfd\u7a0b", "lg", weight="bold"), text(detail),
-                                   text("\u53ef\u91cd\u65b0\u67e5\u8a62\u6216\u5207\u63db\u5176\u4ed6\u7403\u7a2e\u3002", "xs")]},
-             "footer": {"type": "box", "layout": "vertical", "spacing": "sm",
-                        "contents": [button("\u91cd\u65b0\u67e5\u8a62", name), button("\u6a21\u64ec\u5c0d\u6230\u5206\u6790", demo, "#475569"), button("\u5176\u4ed6\u904b\u52d5", MENU, "#334155")]}}}
+        name = BASEBALL_LEAGUE_LABELS.get(sport, "MLB")
+        error = bool(snapshot.errors)
+        msg = ("賽程資料來源暫時沒有回應，尚無法確認當前賽事。"
+               if error else "當前無賽事紀錄，可稍後查詢。")
+        return empty_state_card(name, msg, category="賽事", error=error,
+                                back="棒球", retry=name)
+    name = (SOCCER_LEAGUE_LABELS.get(sport) or
+            BASKETBALL_LEAGUE_LABELS.get(sport) or SPORTS.get(sport, "賽事"))
+    error = bool(snapshot.errors)
+    msg = ("賽程資料來源暫時沒有回應，尚無法確認當前賽事。"
+           if error else "當前無賽事紀錄，可稍後查詢。")
+    return empty_state_card(name, msg, category="賽事", error=error,
+                            back=MENU, retry=name)
 
 
 BASKETBALL_LEAGUE_LABELS = {
@@ -1449,7 +1463,8 @@ class Controller:
             info = caption + " 沒有查到該日實際賽事。"
             if had_error:
                 info += "\n部分賽程資料來源未回應，無法確認賽程是否完整。"
-            return {"type": "text", "text": info, "quickReply": quick_menu()}
+            return empty_state_card(caption, info, category="賽事",
+                                    error=had_error, back=SPECIFIED if requested else MENU)
         return {"type": "flex", "altText": caption + "｜點選實際賽事進行分析",
                 "quickReply": quick_menu(),
                 "contents": {"type": "carousel", "contents": bubbles}}
@@ -1835,8 +1850,9 @@ class Controller:
                 upcoming = [g for g in snapshot.games if g.state != "final" and g.start >= now]
                 upcoming.sort(key=lambda g: g.start)
                 if not upcoming:
-                    return [{"type": "text", "text": f"{league_name}｜目前沒有可供 AI 合理賠率推算的未開賽場次。",
-                             "quickReply": quick_menu()}]
+                    return [empty_state_card(f"{league_name}｜AI 合理賠率",
+                                             "當前無賽事紀錄，暫無可推估的合理賠率。",
+                                             category="賠率", back="台灣運彩賠率")]
                 sport = ("足球" if league_name in SOCCER_LEAGUES else
                          "籃球" if league_name in ("NBA", "NCAA", "NBL", "TPBL") else "棒球")
                 async def estimate(g):
@@ -1854,9 +1870,9 @@ class Controller:
                 results = await asyncio.gather(*(estimate(g) for g in upcoming[:8]))
                 data = [x for x in results if x]
                 if not data:
-                    return [{"type": "text",
-                             "text": f"{league_name}｜賽程已取得，但雙方近五場完整賽果不足，暫不產生 AI 合理賠率。",
-                             "quickReply": quick_menu()}]
+                    return [empty_state_card(f"{league_name}｜AI 合理賠率",
+                                             "目前沒有足夠的近五場歷史紀錄，暫無可核實的合理賠率。",
+                                             category="賠率", back="台灣運彩賠率")]
                 day = now.strftime("%Y-%m-%d")
                 self.odds.cache[("tw", league_name, day)] = (time.monotonic(), data)
                 return [odds_fixture_picker("tw", league_name, data,
@@ -1883,8 +1899,13 @@ class Controller:
                               "賠率來源暫時無法連線，請稍後再試。")
                     if status in ("not_offered", "no_events"):
                         reason = "當日無賽事賠率"
-                    return [{"type":"text","text":f"{source}｜{league_name}：{reason}","quickReply":quick_menu()}]
-                return [{"type":"text","text":f"{source}｜{league_name}：已嘗試公開網站資料來源，但目前沒有成功取得可核實盤口；其他聯盟需授權 API。","quickReply":quick_menu()}]
+                    return [empty_state_card(f"{source}｜{league_name}", reason,
+                                             category="賠率",
+                                             error=status not in ("not_offered", "no_events"),
+                                             back="娛樂平台賠率")]
+                return [empty_state_card(f"{source}｜{league_name}",
+                                         "目前沒有取得可核實的賠率資料。",
+                                         category="賠率", error=True, back="台灣運彩賠率")]
             return [odds_fixture_picker(provider, league_name, data,
                                         odds_logo_lookup(self.fixtures, league_name))]
         if compact in KEYS:
