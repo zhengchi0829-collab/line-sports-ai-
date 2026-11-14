@@ -574,7 +574,7 @@ def quick_menu() -> dict:
     labels = [
         ("⚽ 足球", "足球"), ("🏀 籃球", "籃球"), ("⚾ 棒球", "棒球"),
         ("📅 今日賽事", TODAY), ("📆 指定日期", SPECIFIED),
-        ("🗓️ 未來賽事", FUTURE), ("📊 檢視賠率", "檢視賠率"), ("🏠 主選單", MENU),
+        ("🗓️ 未來賽事", FUTURE), ("📊 賠率分析", "檢視賠率"), ("🏠 主選單", MENU),
     ]
     return {"items": [{"type": "action", "action": {"type": "message", "label": label, "text": cmd}}
                       for label, cmd in labels]}
@@ -658,16 +658,16 @@ def date_league_menu(mode: str, category: str, selected: date) -> dict:
 
 
 def odds_category_menu() -> dict:
-    return {"type": "flex", "altText": "檢視賠率｜選擇來源",
+    return {"type": "flex", "altText": "賠率分析｜選擇來源",
             "quickReply": quick_menu(),
             "contents": {"type": "bubble", "size": "kilo",
                 "header": {"type": "box", "layout": "vertical",
                            "backgroundColor": "#0F172A", "paddingAll": "16px",
-                           "contents": [text("📊 檢視賠率", "lg", "#FFFFFF", "bold"),
+                           "contents": [text("📊 賠率分析", "lg", "#FFFFFF", "bold"),
                                         text("選擇資料來源；不使用模擬賠率", "sm", "#CBD5E1")]},
                 "body": {"type": "box", "layout": "vertical", "spacing": "md",
-                         "contents": [button("🇹🇼 台灣運彩賠率", "台灣運彩賠率", "#0F766E"),
-                                      button("🎮 娛樂平台賠率", "娛樂平台賠率", "#7C3AED"),
+                         "contents": [button("🇹🇼 台灣運彩賠率", "台灣運彩賠率", "#334155"),
+                                      button("🎮 娛樂平台賠率", "娛樂平台賠率", "#334155"),
                                       button("🏠 回主選單", MENU, "#334155")]}}}
 
 
@@ -694,10 +694,12 @@ def odds_league_menu(provider: str) -> dict:
                                text("📊 " + provider, "lg", "#FFFFFF", "bold"),
                                text("請選擇要查詢的聯盟", "sm", "#CBD5E1")]},
                 "body": {"type": "box", "layout": "vertical",
-                         "spacing": "xs", "paddingAll": "12px",
+                         "spacing": "sm", "paddingAll": "14px",
                          "contents": [
-                             *(button("📈 " + league, "賠率" + prefix + league)
-                               for league in leagues),
+                             *(button("📈 " + league, "賠率" + prefix + league,
+                                      "#C2410C" if league in ("NBA", "NCAA", "NBL", "TPBL") else
+                                      "#7C3AED" if league in ("MLB", "NPB", "KBO", "CPBL", "MiLB") else
+                                      "#0F766E") for league in leagues),
                              text("尚未設定授權 API；點選聯盟可查看原因。" if not configured
                                   else "僅顯示有來源、可核實的賠率資料。",
                                   "xs", "#CBD5E1"),
