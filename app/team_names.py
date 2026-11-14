@@ -180,6 +180,23 @@ BASKETBALL_ZH = {
     "Taoyuan Taiwan Beer Leopards": "桃園台啤永豐雲豹",
     "Taoyuan Leopards": "桃園台啤永豐雲豹", "桃園台啤永豐雲豹": "桃園台啤永豐雲豹",
     "Hsinchu Toplus Lioneers": "新竹御嵿攻城獅", "新竹御嵿攻城獅": "新竹御嵿攻城獅",
+    # Additional verified-name aliases surfaced by Render NCAA coverage logs
+    "Abraham Baldwin Agricultural Stallions": "亞伯拉罕鮑德溫農業學院駿馬",
+    "Alabama A&M Bulldogs": "阿拉巴馬農工鬥牛犬",
+    "Alabama State Hornets": "阿拉巴馬州立黃蜂",
+    "American University Eagles": "美利堅大學老鷹",
+    "Bethune-Cookman Wildcats": "貝圖恩庫克曼野貓",
+    "Boise State Broncos": "波夕州立野馬",
+    "Boston College Eagles": "波士頓學院老鷹",
+    "Boston University Terriers": "波士頓大學㹴犬",
+    "Buffalo Bulls": "水牛城大學公牛",
+    "Cal State Bakersfield Roadrunners": "加州州立貝克斯菲爾德走鵑",
+    "Canisius Golden Griffins": "卡尼修斯金獅鷲",
+    "Capital Crusaders": "首都大學十字軍",
+    "Central Connecticut Blue Devils": "中康乃狄克州立藍魔",
+    "Charleston Cougars": "查爾斯頓美洲獅",
+    "Coastal Carolina Chanticleers": "海岸卡羅來納雄雞",
+    "Colgate Raiders": "柯蓋德突擊者",
     # NCAA major programs
     "Duke Blue Devils": "杜克藍魔", "North Carolina Tar Heels": "北卡羅來納焦油腳跟",
     "Kentucky Wildcats": "肯塔基野貓", "Kansas Jayhawks": "堪薩斯松鴉鷹",
@@ -640,7 +657,7 @@ _ALL = {**SOCCER_ZH, **BASKETBALL_ZH, **BASEBALL_ZH, **EXTRA_TEAMS_ZH}
 def _key(value: str) -> str:
     value = unicodedata.normalize("NFKD", str(value or ""))
     value = "".join(ch for ch in value if not unicodedata.combining(ch))
-    return re.sub(r"[^a-z0-9]", "", value.casefold())
+    return re.sub(r"[^a-z0-9\u3400-\u9fff]", "", value.casefold())
 
 _NORMALIZED = {_key(k): v for k, v in _ALL.items()}
 
