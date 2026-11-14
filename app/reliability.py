@@ -1870,11 +1870,19 @@ class Controller:
             if not data:
                 if provider == "platform":
                     status = self.odds.daily_status(league_name)
-                    reason = ("免費賠率額度不足以同步全部聯盟，今天不會進行額外收費查詢。"
+                    reason = ("免費賠率額度不足以同步全部聯盟；本日暫不進行額外查詢。"
                               if status == "quota" else
-                              "本次同步沒有取得該聯盟的可用賠率，當天不會對該聯盟重複查詢。"
+                              "目前沒有開放此聯盟的賠率市場，並非程式故障。"
+                              if status == "not_offered" else
+                              "當前賠率來源沒有提供此聯盟的開盤賽事。"
+                              if status == "no_events" else
+                              "今日賠率資料請求失敗，為避免重複消耗 API 額度，暫不自動重試。"
+                              if status == "api_error" else
+                              "本日查詢已嘗試，尚未取得可用盤口；不會重複扣除額度。"
                               if status == "unavailable" else
                               "賠率來源暫時無法連線，請稍後再試。")
+                    if league_name == "MLB" and status in ("not_offered", "no_events"):
+                        reason = "MLB 目前是休賽季，當前賠率來源沒有可用的比賽盤口；球季開打、有實際盤口時才會顯示。"
                     return [{"type":"text","text":f"{source}｜{league_name}：{reason}","quickReply":quick_menu()}]
                 return [{"type":"text","text":f"{source}｜{league_name}：已嘗試公開網站資料來源，但目前沒有成功取得可核實盤口；其他聯盟需授權 API。","quickReply":quick_menu()}]
             return [odds_fixture_picker(provider, league_name, data,
