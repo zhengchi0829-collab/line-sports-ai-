@@ -1109,7 +1109,25 @@ def empty_state_card(title: str, message: str, *, category: str = "賽事",
     if retry:
         actions.append(button("🔄 重新查詢", retry, accent))
     actions.append(button("↩ 返回" + ("賠率選單" if category == "賠率" else "主選單"),
-                          back, "#334155"))
+                          back, "#1E3A5F"))
+    # Styleable Flex footer navigation. LINE's native Quick Reply pills cannot
+    # have custom backgrounds, so keep them as native shortcuts.
+    actions.append({"type": "separator", "margin": "md", "color": "#334155"})
+    actions.append({"type": "box", "layout": "horizontal", "spacing": "sm",
+                    "contents": [
+                        {"type": "button", "style": "primary", "height": "sm",
+                         "flex": 1, "color": "#0F766E",
+                         "action": {"type": "message", "label": "📅 賽事",
+                                    "text": TODAY}},
+                        {"type": "button", "style": "primary", "height": "sm",
+                         "flex": 1, "color": "#1D4ED8",
+                         "action": {"type": "message", "label": "📊 賠率",
+                                    "text": "檢視賠率"}},
+                        {"type": "button", "style": "primary", "height": "sm",
+                         "flex": 1, "color": "#334155",
+                         "action": {"type": "message", "label": "🏠 首頁",
+                                    "text": MENU}}
+                    ]})
     return {"type": "flex", "altText": (title + "｜" + status)[:400],
             "quickReply": quick_menu(),
             "contents": {"type": "bubble", "size": "kilo",
@@ -1130,6 +1148,7 @@ def empty_state_card(title: str, message: str, *, category: str = "賽事",
                                       text(message, "sm", "#475569")]}]},
                              text("資料更新後即可重新查詢", "xs", "#64748B")]},
                 "footer": {"type": "box", "layout": "vertical", "spacing": "sm",
+                           "backgroundColor": "#0F172A",
                            "paddingAll": "12px", "contents": actions}}}
 
 
