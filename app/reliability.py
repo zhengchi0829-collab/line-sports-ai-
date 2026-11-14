@@ -678,8 +678,8 @@ def odds_league_menu(provider: str) -> dict:
     stopping at a credential warning. Both sources remain odds-menu only.
     """
     prefix = "台灣運彩" if provider == "台灣運彩賠率" else "娛樂平台"
-    key = "JBOT_API_TOKEN" if prefix == "台灣運彩" else "THE_ODDS_API_KEY"
-    configured = bool(os.getenv(key, "").strip())
+    configured = (bool(os.getenv("JBOT_API_TOKEN", "").strip()) if prefix == "台灣運彩"
+                  else bool((os.getenv("ODDS_API_KEY") or os.getenv("THE_ODDS_API_KEY") or "").strip()))
     if prefix == "台灣運彩":
         leagues = ("NBA", "MLB", "英超", "西甲", "德甲", "義甲", "法甲",
                    "歐冠", "NPB", "KBO", "CPBL")
@@ -710,7 +710,7 @@ def odds_source_card(provider: str) -> dict:
     desc = ("台灣運彩即時盤口需在 Render 設定 JBOT_API_TOKEN；目前尚未完成授權資料接入。"
             "請由官方賽事表查看當下價格；不會顯示猜測值。"
             if official else
-            "娛樂平台盤口需在 Render 設定 THE_ODDS_API_KEY；目前尚未完成授權資料接入。"
+            "娛樂平台盤口需在 Render 設定 ODDS_API_KEY；目前尚未完成授權資料接入。"
             "不同平台盤口與賠率不同，不能套用其他平台的數據。")
     controls = [button("🔄 重新查詢來源", provider, "#0F766E"),
                 button("↩ 返回賠率分類", "檢視賠率", "#334155")]
@@ -1497,7 +1497,8 @@ class Controller:
         if match_odds:
             source, league_name = match_odds.groups()
             provider = "tw" if source == "台灣運彩" else "platform"
-            configured = bool(os.getenv("JBOT_API_TOKEN" if provider=="tw" else "THE_ODDS_API_KEY","").strip())
+            configured = (bool(os.getenv("JBOT_API_TOKEN", "").strip()) if provider == "tw"
+                          else bool((os.getenv("ODDS_API_KEY") or os.getenv("THE_ODDS_API_KEY") or "").strip()))
             if not configured:
                 return [odds_source_card("台灣運彩賠率" if provider=="tw" else "娛樂平台賠率")]
             now = datetime.now(TZ)
