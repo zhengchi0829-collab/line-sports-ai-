@@ -180,7 +180,7 @@ def format_book(book, predicted=None):
     return "\n".join(parts)
 
 class OddsGateway:
-    """Only one The Odds API lookup and one matchup per Taiwan day.
+    """Only one The Odds API lookup per Taiwan day, caching all returned fixtures.
 
     Filesystem cache avoids repeat charges during ordinary requests/restarts
     on the same instance. Render free ephemeral disk can reset on redeploy;
@@ -250,13 +250,14 @@ class OddsGateway:
                 )
                 if response.status_code == 200:
                     all_rows = theodds_normalize(response.json())
-                    # A single matchup (not four unrelated games).
-                    if all_rows:
-                        first = all_rows[0]
-                        rows = [row for row in all_rows
-                                if row["home"] == first["home"]
-                                and row["away"] == first["away"]
-                                and row["start"] == first["start"]][:1]
+                    # Keep all available matchups from the chosen league. Use a
+                    # single bookmaker quote for each fixture to avoid flooding LINE.
+                    seen = set()
+                    for row in all_rows:
+                        identity = (row["home"], row["away"], row["start"])
+                        if identity not in seen:
+                            seen.add(identity)
+                            rows.append(row)
             except (httpx.HTTPError, ValueError, TypeError, KeyError):
                 rows = []
             self._save_daily({"day": day, "league": league,
