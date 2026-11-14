@@ -707,6 +707,22 @@ MLB_LOGO_IDS = {
 }
 
 
+# Known TPBL team emblems from identifiable league/team and sports sources.
+# These are references only; no odds API request is needed for images.
+TPBL_LOGOS = {
+    "臺北台新戰神": "https://shoplineimg.com/651bb5817bdc4c00529a8d9e/6705f90802311f001012c56a/1200x.png",
+    "新北中信特攻": "https://r2.thesportsdb.com/images/media/team/badge/9guoh01744900482.png",
+    "新北國王": "https://assets.fiba.basketball/image/upload/v1741778208/ujjyzwumxir1iq0xqjjj.png",
+    "桃園台啤永豐雲豹": "https://www.volters.jp/files/user/202308311259_1.jpg",
+    "新竹御嵿攻城獅": "https://pleagueofficial.com/upload/p_team/logo_3_1703055256.png",
+    "福爾摩沙夢想家": "https://imgs.tsna.com/article/1698824825_WU3gW.jpg",
+    "高雄全家海神": "https://www.lala-peace.tw/images/logo11.png",
+}
+TPBL_LOGOS.update({
+    "台北台新戰神": TPBL_LOGOS["臺北台新戰神"],
+    "新竹御頂攻城獅": TPBL_LOGOS["新竹御嵿攻城獅"],
+})
+
 def logo_key(name: str) -> str:
     return re.sub(r"[^\w]", "", str(name or "")).casefold()
 
@@ -740,6 +756,9 @@ def odds_logo_lookup(fixtures, league: str) -> dict[str, str]:
     for name in (NBA_LOGO_IDS if league == "NBA" else
                  MLB_LOGO_IDS if league == "MLB" else {}):
         register_logo(logos, name, official_logo(league, name))
+    if league == "TPBL":
+        for name, url in TPBL_LOGOS.items():
+            register_logo(logos, name, url)
     snapshot = fixtures.last.get(source_key) if source_key else None
     if snapshot:
         for game in snapshot.games:
@@ -1082,6 +1101,10 @@ def fallback_team_logo(sport: str, raw_name: str, current: str = "") -> str:
     if isinstance(current, str) and current.startswith("https://"):
         return current
     name = str(raw_name).strip()
+    if sport == "basketball_tpbl":
+        logo = TPBL_LOGOS.get(name) or TPBL_LOGOS.get(chinese_name(name))
+        if logo:
+            return logo
     league = "NBA" if sport == "basketball" else "MLB" if sport == "baseball" else ""
     known = official_logo(league, name)
     if known:
