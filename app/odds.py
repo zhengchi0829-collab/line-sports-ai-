@@ -304,7 +304,15 @@ class OddsGateway:
         if record.get("state") == "attempted":
             return "unavailable"
         rows = record.get("leagues", {}).get(league, [])
-        return "cached" if rows else "unavailable"
+        if rows:
+            return "cached"
+        if league in record.get("not_offered", []):
+            return "not_offered"
+        if league in record.get("empty_leagues", []):
+            return "no_events"
+        if league in record.get("failed_leagues", []):
+            return "api_error"
+        return "unavailable"
 
     def stored_platform_rows(self, league):
         record = self.daily
@@ -339,6 +347,7 @@ class OddsGateway:
                                   if isinstance(sport, dict) and sport.get("active")}
                 supported = [(label, sport_key) for label, sport_key in KEYS.items()
                              if sport_key in available_keys]
+                not_offered = [label for label in KEYS if label not in {name for name, _ in supported}]
                 # Three markets in one US region consume at most 3 credits
                 # per league when data is present. Check quota before spending.
                 required_credits = 3 * len(supported)
@@ -364,7 +373,7 @@ class OddsGateway:
                                 "oddsFormat": "decimal"},
                         timeout=6)
                     if response.status_code != 200:
-                        return label, [], None
+                        return label, [], None, "api_error"
                     all_rows = theodds_normalize(response.json())
                     seen = set()
                     rows = []
@@ -374,17 +383,20 @@ class OddsGateway:
                             seen.add(identity)
                             rows.append(row)
                     balance = response.headers.get("x-requests-remaining")
-                    return label, rows, int(balance) if balance is not None else None
+                    return label, rows, int(balance) if balance is not None else None, ("ok" if rows else "no_events")
                 except (httpx.HTTPError, ValueError, TypeError, KeyError):
-                    return label, [], None
+                    return label, [], None, "api_error"
 
             outcomes = await asyncio.gather(
                 *(fetch_one(label, sport_key) for label, sport_key in supported))
-            leagues = {label: rows for label, rows, _ in outcomes}
-            balances = [balance for _, _, balance in outcomes if balance is not None]
+            leagues = {label: rows for label, rows, _, _ in outcomes}
+            balances = [balance for _, _, balance, _ in outcomes if balance is not None]
             result = {"day": day, "state": "ready", "leagues": leagues,
                       "remaining": min(balances) if balances else remaining,
-                      "attempted_leagues": [label for label, _ in supported]}
+                      "attempted_leagues": [label for label, _ in supported],
+                      "not_offered": not_offered,
+                      "empty_leagues": [label for label, _, _, state in outcomes if state == "no_events"],
+                      "failed_leagues": [label for label, _, _, state in outcomes if state == "api_error"]}
             self._save_daily(result)
             return leagues.get(league, [])
 
