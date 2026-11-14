@@ -1570,11 +1570,10 @@ class Controller:
             # No API call for platform detail clicks: read only the daily snapshot.
             if provider == "platform":
                 daily = self.odds.daily
-                if (daily.get("day") != datetime.now(TZ).strftime("%Y-%m-%d")
-                        or daily.get("league") != league_name):
+                if daily.get("day") != datetime.now(TZ).strftime("%Y-%m-%d"):
                     return [{"type": "text", "text": "本日賠率快取尚未建立或已過期，請重新選擇聯盟。",
                              "quickReply": quick_menu()}]
-                records = daily.get("rows", [])
+                records = self.odds.stored_platform_rows(league_name)
             else:
                 records = self.odds.cache.get(("tw", league_name, datetime.now(TZ).strftime("%Y-%m-%d")), (0, []))[1]
             index = int(slot)
@@ -1595,11 +1594,11 @@ class Controller:
             if not data:
                 if provider == "platform":
                     status = self.odds.daily_status(league_name)
-                    reason = ("今日免費額度已使用於其他聯盟，明天台灣時間 00:00 後可選擇新的聯盟。"
-                              if status == "other_league" else
-                              "今日唯一一次賠率查詢無可用盤口或來源暫時失敗；今天不會再次呼叫 API。"
+                    reason = ("免費賠率額度不足以同步全部聯盟，今天不會進行額外收費查詢。"
+                              if status == "quota" else
+                              "本次同步沒有取得該聯盟的可用賠率，當天不會對該聯盟重複查詢。"
                               if status == "unavailable" else
-                              "目前沒有可驗證賠率資料。")
+                              "賠率來源暫時無法連線，請稍後再試。")
                     return [{"type":"text","text":f"{source}｜{league_name}：{reason}","quickReply":quick_menu()}]
                 return [{"type":"text","text":f"{source}｜{league_name} 今日尚無可核實賠率資料（或資料源暫時無法連線）。","quickReply":quick_menu()}]
             return [odds_fixture_picker(provider, league_name, data)]
