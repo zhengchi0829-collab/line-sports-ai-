@@ -1881,8 +1881,8 @@ class Controller:
                               "本日查詢已嘗試，尚未取得可用盤口；不會重複扣除額度。"
                               if status == "unavailable" else
                               "賠率來源暫時無法連線，請稍後再試。")
-                    if league_name == "MLB" and status in ("not_offered", "no_events"):
-                        reason = "MLB 目前是休賽季，當前賠率來源沒有可用的比賽盤口；球季開打、有實際盤口時才會顯示。"
+                    if status in ("not_offered", "no_events"):
+                        reason = "當日無賽事賠率"
                     return [{"type":"text","text":f"{source}｜{league_name}：{reason}","quickReply":quick_menu()}]
                 return [{"type":"text","text":f"{source}｜{league_name}：已嘗試公開網站資料來源，但目前沒有成功取得可核實盤口；其他聯盟需授權 API。","quickReply":quick_menu()}]
             return [odds_fixture_picker(provider, league_name, data,
