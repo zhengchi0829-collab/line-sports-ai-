@@ -1504,9 +1504,19 @@ class Controller:
             now = datetime.now(TZ)
             data = await self.odds.feed(provider, league_name, now.strftime("%Y-%m-%d"))
             if not data:
+                if provider == "platform":
+                    status = self.odds.daily_status(league_name)
+                    reason = ("今日免費額度已使用於其他聯盟，明天台灣時間 00:00 後可選擇新的聯盟。"
+                              if status == "other_league" else
+                              "今日唯一一次賠率查詢無可用盤口或來源暫時失敗；今天不會再次呼叫 API。"
+                              if status == "unavailable" else
+                              "目前沒有可驗證賠率資料。")
+                    return [{"type":"text","text":f"{source}｜{league_name}：{reason}","quickReply":quick_menu()}]
                 return [{"type":"text","text":f"{source}｜{league_name} 今日尚無可核實賠率資料（或資料源暫時無法連線）。","quickReply":quick_menu()}]
-            lines=[format_book(row) for row in data[:4]]
-            return [{"type":"text","text":"\n\n".join(lines)[:4700],"quickReply":quick_menu()}]
+            lines=[format_book(row) for row in data[:1]]
+            suffix = ("\n\n📌 每天只查一次 The Odds API；當天重複查看使用快取，不會再次耗用額度。"
+                      if provider == "platform" else "")
+            return [{"type":"text","text":("\n\n".join(lines)+suffix)[:4700],"quickReply":quick_menu()}]
         if compact in KEYS:
             key = KEYS[compact]
             return [fixture_cards(key, await self.fixtures.get(key), self.ui.team_zh)]
