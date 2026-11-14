@@ -675,7 +675,7 @@ def odds_logo_lookup(fixtures, league: str) -> dict[str, str]:
             for raw, current in ((game.home, game.home_logo), (game.away, game.away_logo)):
                 logo = fallback_team_logo(source_key, raw, current)
                 if isinstance(logo, str) and logo.startswith("https://"):
-                    logos.setdefault(re.sub(r"[^\\w]", "", str(raw)).casefold(), logo)
+                    logos.setdefault(re.sub(r"[^\w]", "", str(raw)).casefold(), logo)
     return logos
 
 
@@ -699,7 +699,7 @@ def odds_team_row(name: str, logo: str, role: str) -> dict:
 
 
 def odds_team_logo(logos: dict[str, str], original: str) -> str:
-    return logos.get(re.sub(r"[^\\w]", "", str(original)).casefold(), "")
+    return logos.get(re.sub(r"[^\w]", "", str(original)).casefold(), "")
 
 
 def odds_fixture_picker(provider: str, league: str, records: list[dict], logos: dict[str, str] | None = None) -> dict:
