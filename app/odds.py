@@ -220,50 +220,94 @@ class OddsGateway:
         record = self.daily
         if record.get("day") != day:
             return "available"
-        if record.get("league") != league:
-            return "other_league"
-        if record.get("state") == "ready":
-            return "cached"
-        return "unavailable"
+        if record.get("state") == "quota":
+            return "quota"
+        if record.get("state") == "attempted":
+            return "unavailable"
+        rows = record.get("leagues", {}).get(league, [])
+        return "cached" if rows else "unavailable"
+
+    def stored_platform_rows(self, league):
+        record = self.daily
+        if record.get("day") != datetime.now(TZ).strftime("%Y-%m-%d"):
+            return []
+        return record.get("leagues", {}).get(league, [])
 
     async def _daily_platform_feed(self, league):
+        """The first tap preloads every available league, then all taps use cache.
+
+        Each sport requires its own The Odds API request. We check the remaining
+        free-plan credits via the zero-cost /sports endpoint before a daily batch.
+        """
         day = datetime.now(TZ).strftime("%Y-%m-%d")
         async with self.daily_lock:
             record = self.daily
             if record.get("day") == day:
-                return record.get("rows", []) if record.get("league") == league else []
-            sport = KEYS.get(league)
+                return self.stored_platform_rows(league)
             key = (os.getenv("ODDS_API_KEY") or os.getenv("THE_ODDS_API_KEY") or "").strip()
-            if not key or not sport:
+            if not key or league not in KEYS:
                 return []
-            # This marker is stored before the request: even errors do not retry.
-            pending = {"day": day, "league": league, "state": "attempted", "rows": []}
+            headers = {"x-api-key": key}
+            try:
+                catalog_response = await self.client.get(
+                    "https://api.the-odds-api.com/v4/sports/",
+                    headers=headers, timeout=5)
+                catalog_response.raise_for_status()
+                catalog = catalog_response.json()
+                if not isinstance(catalog, list):
+                    return []
+                available_keys = {sport.get("key") for sport in catalog
+                                  if isinstance(sport, dict) and sport.get("active")}
+                supported = [(label, sport_key) for label, sport_key in KEYS.items()
+                             if sport_key in available_keys]
+                # Three markets in one US region consume at most 3 credits
+                # per league when data is present. Check quota before spending.
+                required_credits = 3 * len(supported)
+                remaining = int(catalog_response.headers.get("x-requests-remaining", "-1"))
+            except (httpx.HTTPError, ValueError, TypeError, KeyError):
+                return []
+            if remaining < required_credits:
+                self._save_daily({"day": day, "state": "quota",
+                                  "leagues": {}, "remaining": remaining})
+                return []
+            # Save before requesting odds so repeated clicks cannot spend twice.
+            pending = {"day": day, "state": "attempted", "leagues": {},
+                       "remaining": remaining}
             if not self._save_daily(pending):
                 return []
-            rows = []
-            try:
-                response = await self.client.get(
-                    f"https://api.the-odds-api.com/v4/sports/{sport}/odds",
-                    params={"apiKey": key, "regions": "us",
-                            "markets": "h2h,spreads,totals", "oddsFormat": "decimal"},
-                    timeout=5,
-                )
-                if response.status_code == 200:
+
+            async def fetch_one(label, sport_key):
+                try:
+                    response = await self.client.get(
+                        f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds",
+                        headers=headers,
+                        params={"regions": "us", "markets": "h2h,spreads,totals",
+                                "oddsFormat": "decimal"},
+                        timeout=6)
+                    if response.status_code != 200:
+                        return label, [], None
                     all_rows = theodds_normalize(response.json())
-                    # Keep all available matchups from the chosen league. Use a
-                    # single bookmaker quote for each fixture to avoid flooding LINE.
                     seen = set()
+                    rows = []
                     for row in all_rows:
                         identity = (row["home"], row["away"], row["start"])
                         if identity not in seen:
                             seen.add(identity)
                             rows.append(row)
-            except (httpx.HTTPError, ValueError, TypeError, KeyError):
-                rows = []
-            self._save_daily({"day": day, "league": league,
-                              "state": "ready" if rows else "unavailable",
-                              "rows": rows})
-            return rows
+                    balance = response.headers.get("x-requests-remaining")
+                    return label, rows, int(balance) if balance is not None else None
+                except (httpx.HTTPError, ValueError, TypeError, KeyError):
+                    return label, [], None
+
+            outcomes = await asyncio.gather(
+                *(fetch_one(label, sport_key) for label, sport_key in supported))
+            leagues = {label: rows for label, rows, _ in outcomes}
+            balances = [balance for _, _, balance in outcomes if balance is not None]
+            result = {"day": day, "state": "ready", "leagues": leagues,
+                      "remaining": min(balances) if balances else remaining,
+                      "attempted_leagues": [label for label, _ in supported]}
+            self._save_daily(result)
+            return leagues.get(league, [])
 
     async def feed(self, provider, league, date):
         if provider != "tw":
