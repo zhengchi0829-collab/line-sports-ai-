@@ -104,6 +104,16 @@ def score_only_card(game: Game, team_name) -> dict:
                 "body": {"type": "box", "layout": "vertical", "paddingAll": "18px",
                          "backgroundColor": "#061425", "spacing": "sm",
                          "contents": [
+                             odds_team_row(home, fallback_team_logo(
+                                 "basketball" if game.league == "NBA" else
+                                 "baseball" if game.league == "MLB" else
+                                 "baseball_cpbl" if game.league == "CPBL" else "",
+                                 game.home, game.home_logo), "主隊"),
+                             odds_team_row(away, fallback_team_logo(
+                                 "basketball" if game.league == "NBA" else
+                                 "baseball" if game.league == "MLB" else
+                                 "baseball_cpbl" if game.league == "CPBL" else "",
+                                 game.away, game.away_logo), "客隊"),
                              text("最終比分" if result != "比分未提供" else "賽果", "sm",
                                   "#55EFFF", "bold"),
                              text(result, "xxl", "#FFFFFF", "bold")]}}}
