@@ -1748,7 +1748,7 @@ class Controller:
         if match_odds:
             source, league_name = match_odds.groups()
             provider = "tw" if source == "台灣運彩" else "platform"
-            configured = (bool(os.getenv("JBOT_API_TOKEN", "").strip()) if provider == "tw"
+            configured = ((bool(os.getenv("JBOT_API_TOKEN", "").strip()) or league_name in ("NBA", "MLB")) if provider == "tw"
                           else bool((os.getenv("ODDS_API_KEY") or os.getenv("THE_ODDS_API_KEY") or "").strip()))
             if not configured:
                 return [odds_source_card("台灣運彩賠率" if provider=="tw" else "娛樂平台賠率")]
@@ -1763,7 +1763,7 @@ class Controller:
                               if status == "unavailable" else
                               "賠率來源暫時無法連線，請稍後再試。")
                     return [{"type":"text","text":f"{source}｜{league_name}：{reason}","quickReply":quick_menu()}]
-                return [{"type":"text","text":f"{source}｜{league_name} 今日尚無可核實賠率資料（或資料源暫時無法連線）。","quickReply":quick_menu()}]
+                return [{"type":"text","text":f"{source}｜{league_name}：已嘗試公開網站資料來源，但目前沒有成功取得可核實盤口；其他聯盟需授權 API。","quickReply":quick_menu()}]
             return [odds_fixture_picker(provider, league_name, data,
                                         odds_logo_lookup(self.fixtures, league_name))]
         if compact in KEYS:
