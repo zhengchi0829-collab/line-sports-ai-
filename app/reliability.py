@@ -1513,10 +1513,29 @@ class Controller:
                               "目前沒有可驗證賠率資料。")
                     return [{"type":"text","text":f"{source}｜{league_name}：{reason}","quickReply":quick_menu()}]
                 return [{"type":"text","text":f"{source}｜{league_name} 今日尚無可核實賠率資料（或資料源暫時無法連線）。","quickReply":quick_menu()}]
-            lines=[format_book(row) for row in data[:1]]
-            suffix = ("\n\n📌 每天只查一次 The Odds API；當天重複查看使用快取，不會再次耗用額度。"
-                      if provider == "platform" else "")
-            return [{"type":"text","text":("\n\n".join(lines)+suffix)[:4700],"quickReply":quick_menu()}]
+            if provider == "platform":
+                # The API call returns the selected league's available games.
+                # Display every returned fixture, not just the first matchup.
+                lines = [format_book(row) for row in data]
+                stamp = "📊 " + league_name + "｜本次取得 " + str(len(lines)) + " 場賽事賠率（同一來源快照）"
+                footer = "📌 今日僅查詢一次 API；重複查看沿用快取，賠率並非即時更新。"
+                chunks = []
+                current = stamp
+                for line in lines:
+                    if len(current) + len(line) + 2 > 4300:
+                        chunks.append(current)
+                        current = stamp + "（續）"
+                    current += "\n\n" + line
+                chunks.append(current)
+                if len(chunks) > 5:
+                    chunks = chunks[:5]
+                    chunks[-1] = chunks[-1][:4200] + "\n資料過多，僅顯示前五則訊息。"
+                else:
+                    chunks[-1] = chunks[-1][:4500] + "\n\n" + footer
+                return [{"type":"text", "text":value, "quickReply":quick_menu()}
+                        for value in chunks]
+            lines=[format_book(row) for row in data[:4]]
+            return [{"type":"text","text":"\n\n".join(lines)[:4700],"quickReply":quick_menu()}]
         if compact in KEYS:
             key = KEYS[compact]
             return [fixture_cards(key, await self.fixtures.get(key), self.ui.team_zh)]
