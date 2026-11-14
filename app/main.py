@@ -347,6 +347,8 @@ async def continuous_refresh(app):
                                         for name in (game.home, game.away)})
                         # Already-Chinese names do not need translation.
                         def needs_chinese(name):
+                            if any("\u3400" <= ch <= "\u9fff" for ch in name):
+                                return False
                             if not any("a" <= ch.lower() <= "z" for ch in name):
                                 return False
                             return ui.team_display(name) == name
