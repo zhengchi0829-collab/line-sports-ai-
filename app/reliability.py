@@ -658,10 +658,55 @@ def date_league_menu(mode: str, category: str, selected: date) -> dict:
 
 
 
-def odds_fixture_picker(provider: str, league: str, records: list[dict]) -> dict:
+def odds_logo_lookup(fixtures, league: str) -> dict[str, str]:
+    """Reuse verified fixture-provider team logos; do not guess from odds names."""
+    source_key = {
+        "NBA": "basketball", "NCAA": "basketball_ncaa",
+        "NBL": "basketball_nbl", "TPBL": "basketball_tpbl",
+        "MLB": "baseball", "NPB": "baseball_npb",
+        "KBO": "baseball_kbo", "CPBL": "baseball_cpbl",
+        "MiLB": "baseball_milb",
+        **{name: pair[0] for name, pair in SOCCER_LEAGUES.items()},
+    }.get(league)
+    snap = fixtures.last.get(source_key) if source_key else None
+    logos = {}
+    if snap:
+        for game in snap.games:
+            for raw, current in ((game.home, game.home_logo), (game.away, game.away_logo)):
+                logo = fallback_team_logo(source_key, raw, current)
+                if isinstance(logo, str) and logo.startswith("https://"):
+                    logos.setdefault(re.sub(r"[^\\w]", "", str(raw)).casefold(), logo)
+    return logos
+
+
+def odds_team_row(name: str, logo: str, role: str) -> dict:
+    parts = []
+    if isinstance(logo, str) and logo.startswith("https://"):
+        url = "https://wsrv.nl/?url=" + quote(logo, safe="") + "&w=128&h=128&fit=contain&output=png"
+        parts.append({"type": "image", "url": url, "size": "48px", "flex": 0,
+                      "aspectMode": "fit", "aspectRatio": "1:1"})
+    else:
+        parts.append({"type": "box", "layout": "vertical", "width": "48px",
+                      "height": "48px", "cornerRadius": "24px",
+                      "backgroundColor": "#E2E8F0", "justifyContent": "center",
+                      "alignItems": "center", "contents": [
+                          text((name.strip() or "?")[0], "sm", "#334155", "bold")]})
+    parts.append({"type": "box", "layout": "vertical", "flex": 1,
+                  "contents": [text(role, "xxs", "#64748B"),
+                               text(name, "sm", "#0F172A", "bold")]})
+    return {"type": "box", "layout": "horizontal", "spacing": "sm",
+            "alignItems": "center", "contents": parts}
+
+
+def odds_team_logo(logos: dict[str, str], original: str) -> str:
+    return logos.get(re.sub(r"[^\\w]", "", str(original)).casefold(), "")
+
+
+def odds_fixture_picker(provider: str, league: str, records: list[dict], logos: dict[str, str] | None = None) -> dict:
     """A single LINE carousel card per fixture; details are opened on demand."""
     origin = "娛樂平台" if provider == "platform" else "台灣運彩"
     heading = f"{league}｜選擇賽事"
+    logos = logos or {}
     bubbles = []
     for index, item in enumerate(records[:30]):
         start = item.get("start") or ""
@@ -680,9 +725,9 @@ def odds_fixture_picker(provider: str, league: str, records: list[dict]) -> dict
                                     text(when + "｜台灣時間", "sm", "#CBD5E1")]},
             "body": {"type": "box", "layout": "vertical", "spacing": "md",
                      "paddingAll": "14px", "contents": [
-                         text(home, "md", "#0F172A", "bold"),
+                         odds_team_row(home, odds_team_logo(logos, item.get("home")), "主隊"),
                          text("VS", "xs", "#64748B", "bold"),
-                         text(away, "md", "#0F172A", "bold"),
+                         odds_team_row(away, odds_team_logo(logos, item.get("away")), "客隊"),
                          text("點選下方按鈕查看這場賠率", "xs", "#64748B")]},
             "footer": {"type": "box", "layout": "vertical",
                        "paddingAll": "12px", "contents": [
@@ -700,9 +745,11 @@ def odds_fixture_picker(provider: str, league: str, records: list[dict]) -> dict
             "quickReply": quick_menu(), "contents": contents}
 
 
-def odds_single_match_card(provider: str, league: str, item: dict) -> dict:
+def odds_single_match_card(provider: str, league: str, item: dict,
+                           logos: dict[str, str] | None = None) -> dict:
     """Show only the selected matchup with its verified API quote."""
     source = "娛樂平台" if provider == "platform" else "台灣運彩"
+    logos = logos or {}
     body_lines = format_book(item).split("\n")
     original_matchup = str(item.get("home") or "-") + " vs " + str(item.get("away") or "-")
     translated_matchup = team_display(item.get("home") or "-") + " VS " + team_display(item.get("away") or "-")
@@ -720,7 +767,12 @@ def odds_single_match_card(provider: str, league: str, item: dict) -> dict:
                                         text(team_display(item.get("home") or "-") + " VS " + team_display(item.get("away") or "-"),
                                              "sm", "#CBD5E1")]},
                 "body": {"type": "box", "layout": "vertical", "spacing": "md",
-                         "paddingAll": "14px", "contents": rows},
+                         "paddingAll": "14px", "contents": [
+                             odds_team_row(team_display(item.get("home") or "-"),
+                                           odds_team_logo(logos, item.get("home")), "主隊"),
+                             odds_team_row(team_display(item.get("away") or "-"),
+                                           odds_team_logo(logos, item.get("away")), "客隊"),
+                             *rows]},
                 "footer": {"type": "box", "layout": "vertical", "spacing": "sm",
                            "contents": [button("↩ 選擇其他賽事", "賠率" + source + league, "#334155"),
                                         button("🏠 回主選單", MENU, "#334155")]}}}
@@ -1583,7 +1635,8 @@ class Controller:
             if not isinstance(records, list) or index >= len(records):
                 return [{"type": "text", "text": "本場賠率已失效，請回到賠率選單重新查詢。",
                          "quickReply": quick_menu()}]
-            return [odds_single_match_card(provider, league_name, records[index])]
+            return [odds_single_match_card(provider, league_name, records[index],
+                                           odds_logo_lookup(self.fixtures, league_name))]
         match_odds = re.fullmatch(r"賠率(台灣運彩|娛樂平台)(英超|西甲|德甲|義甲|法甲|歐冠|NBA|NCAA|NBL|TPBL|MLB|NPB|KBO|CPBL|MiLB)", compact)
         if match_odds:
             source, league_name = match_odds.groups()
@@ -1604,7 +1657,8 @@ class Controller:
                               "賠率來源暫時無法連線，請稍後再試。")
                     return [{"type":"text","text":f"{source}｜{league_name}：{reason}","quickReply":quick_menu()}]
                 return [{"type":"text","text":f"{source}｜{league_name} 今日尚無可核實賠率資料（或資料源暫時無法連線）。","quickReply":quick_menu()}]
-            return [odds_fixture_picker(provider, league_name, data)]
+            return [odds_fixture_picker(provider, league_name, data,
+                                        odds_logo_lookup(self.fixtures, league_name))]
         if compact in KEYS:
             key = KEYS[compact]
             return [fixture_cards(key, await self.fixtures.get(key), self.ui.team_zh)]
