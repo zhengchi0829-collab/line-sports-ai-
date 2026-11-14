@@ -669,8 +669,8 @@ def odds_fixture_picker(provider: str, league: str, records: list[dict]) -> dict
             when = instant(start).astimezone(TZ).strftime("%m/%d %H:%M")
         except (ValueError, TypeError):
             when = str(start)[:16] or "時間未提供"
-        home = str(item.get("home") or "-")
-        away = str(item.get("away") or "-")
+        home = team_display(str(item.get("home") or "-"))
+        away = team_display(str(item.get("away") or "-"))
         command = f"賠率單場{origin}{league}#{index}"
         bubble = {
             "type": "bubble", "size": "kilo",
@@ -704,17 +704,20 @@ def odds_single_match_card(provider: str, league: str, item: dict) -> dict:
     """Show only the selected matchup with its verified API quote."""
     source = "娛樂平台" if provider == "platform" else "台灣運彩"
     body_lines = format_book(item).split("\n")
+    original_matchup = str(item.get("home") or "-") + " vs " + str(item.get("away") or "-")
+    translated_matchup = team_display(item.get("home") or "-") + " VS " + team_display(item.get("away") or "-")
+    body_lines = [translated_matchup if line == original_matchup else line for line in body_lines]
     rows = [text(line, "sm", "#334155") for line in body_lines]
     rows.append(text("當日賠率資料｜實際盤口以平台為準",
                      "xs", "#64748B"))
-    return {"type": "flex", "altText": league + "｜" + str(item.get("home")) +
-            " VS " + str(item.get("away")) + " 賠率分析",
+    return {"type": "flex", "altText": (league + "｜" + team_display(item.get("home") or "-") +
+            " VS " + team_display(item.get("away") or "-") + " 賠率分析")[:400],
             "quickReply": quick_menu(),
             "contents": {"type": "bubble", "size": "kilo",
                 "header": {"type": "box", "layout": "vertical", "paddingAll": "16px",
                            "backgroundColor": "#0F172A",
                            "contents": [text("📊 " + league + "｜賠率分析", "lg", "#FFFFFF", "bold"),
-                                        text(str(item.get("home")) + " VS " + str(item.get("away")),
+                                        text(team_display(item.get("home") or "-") + " VS " + team_display(item.get("away") or "-"),
                                              "sm", "#CBD5E1")]},
                 "body": {"type": "box", "layout": "vertical", "spacing": "md",
                          "paddingAll": "14px", "contents": rows},
