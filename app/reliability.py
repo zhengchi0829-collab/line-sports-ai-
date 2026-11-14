@@ -705,7 +705,7 @@ def odds_single_match_card(provider: str, league: str, item: dict) -> dict:
     source = "娛樂平台" if provider == "platform" else "台灣運彩"
     body_lines = format_book(item).split("\n")
     rows = [text(line, "sm", "#334155") for line in body_lines]
-    rows.append(text("單次來源快照｜僅供資訊參考，非即時盤口",
+    rows.append(text("當日賠率資料｜實際盤口以平台為準",
                      "xs", "#64748B"))
     return {"type": "flex", "altText": league + "｜" + str(item.get("home")) +
             " VS " + str(item.get("away")) + " 賠率分析",
