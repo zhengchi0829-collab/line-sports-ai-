@@ -1105,27 +1105,35 @@ def empty_state_card(title: str, message: str, *, category: str = "賽事",
     accent = "#D97706" if error else "#0D9488"
     status = "來源狀態" if error else "暫無資料"
     icon = "⚠️" if error else "📭"
-    actions = []
+    # Flex footer is styleable; LINE Quick Reply chips below the message are not.
+    # Keep their original actions and add a high-contrast sci-fi control deck.
+    actions = [
+        {"type": "box", "layout": "horizontal", "alignItems": "center",
+         "spacing": "sm", "contents": [
+            {"type": "box", "layout": "vertical", "width": "5px", "height": "8px",
+             "backgroundColor": accent, "contents": []},
+            text("SYSTEM NAVIGATION", "xxs", "#67E8F9", "bold"),
+            {"type": "filler"},
+            text("● ONLINE", "xxs", "#5EEAD4", "bold")]},
+        {"type": "separator", "margin": "sm", "color": "#155E75"},
+    ]
     if retry:
-        actions.append(button("🔄 重新查詢", retry, accent))
-    actions.append(button("↩ 返回" + ("賠率選單" if category == "賠率" else "主選單"),
+        actions.append(button("↻ 重新查詢", retry, "#0E7490"))
+    actions.append(button("‹ 返回" + ("賠率選單" if category == "賠率" else "主選單"),
                           back, "#1E3A5F"))
-    # Styleable Flex footer navigation. LINE's native Quick Reply pills cannot
-    # have custom backgrounds, so keep them as native shortcuts.
-    actions.append({"type": "separator", "margin": "md", "color": "#334155"})
     actions.append({"type": "box", "layout": "horizontal", "spacing": "sm",
-                    "contents": [
+                    "margin": "md", "contents": [
                         {"type": "button", "style": "primary", "height": "sm",
                          "flex": 1, "color": "#0F766E",
-                         "action": {"type": "message", "label": "📅 賽事",
+                         "action": {"type": "message", "label": "⚡ 賽事",
                                     "text": TODAY}},
                         {"type": "button", "style": "primary", "height": "sm",
                          "flex": 1, "color": "#1D4ED8",
-                         "action": {"type": "message", "label": "📊 賠率",
+                         "action": {"type": "message", "label": "◈ 賠率",
                                     "text": "檢視賠率"}},
                         {"type": "button", "style": "primary", "height": "sm",
                          "flex": 1, "color": "#334155",
-                         "action": {"type": "message", "label": "🏠 首頁",
+                         "action": {"type": "message", "label": "⌂ 首頁",
                                     "text": MENU}}
                     ]})
     return {"type": "flex", "altText": (title + "｜" + status)[:400],
@@ -1148,8 +1156,8 @@ def empty_state_card(title: str, message: str, *, category: str = "賽事",
                                       text(message, "sm", "#475569")]}]},
                              text("資料更新後即可重新查詢", "xs", "#64748B")]},
                 "footer": {"type": "box", "layout": "vertical", "spacing": "sm",
-                           "backgroundColor": "#0F172A",
-                           "paddingAll": "12px", "contents": actions}}}
+                           "backgroundColor": "#081826",
+                           "paddingAll": "14px", "contents": actions}}}
 
 
 def notice(sport: str, snapshot: Snapshot) -> dict:
