@@ -435,7 +435,10 @@ class OddsGateway:
             if not kind:
                 return []
             if not key:
-                return await self._public_blob_feed(league, date)
+                data = await self._public_blob_feed(league, date)
+                if data:
+                    self.cache[cache_key] = (time.monotonic(), data)
+                return data
             if time.monotonic() - self.last_jbot_call < 5.5:
                 return []
             self.last_jbot_call = time.monotonic()
