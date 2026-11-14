@@ -657,6 +657,72 @@ def date_league_menu(mode: str, category: str, selected: date) -> dict:
                          "contents": contents}}}
 
 
+
+def odds_fixture_picker(provider: str, league: str, records: list[dict]) -> dict:
+    """A single LINE carousel card per fixture; details are opened on demand."""
+    origin = "娛樂平台" if provider == "platform" else "台灣運彩"
+    heading = f"{league}｜選擇賽事"
+    bubbles = []
+    for index, item in enumerate(records[:30]):
+        start = item.get("start") or ""
+        try:
+            when = instant(start).astimezone(TZ).strftime("%m/%d %H:%M")
+        except (ValueError, TypeError):
+            when = str(start)[:16] or "時間未提供"
+        home = self_name = str(item.get("home") or "-")
+        away = str(item.get("away") or "-")
+        command = f"賠率單場{origin}{league}#{index}"
+        bubble = {
+            "type": "bubble", "size": "kilo",
+            "header": {"type": "box", "layout": "vertical",
+                       "backgroundColor": "#0F172A", "paddingAll": "16px",
+                       "contents": [text("📊 " + heading, "lg", "#FFFFFF", "bold"),
+                                    text(when + "｜台灣時間", "sm", "#CBD5E1")]},
+            "body": {"type": "box", "layout": "vertical", "spacing": "md",
+                     "paddingAll": "14px", "contents": [
+                         text(home, "md", "#0F172A", "bold"),
+                         text("VS", "xs", "#64748B", "bold"),
+                         text(away, "md", "#0F172A", "bold"),
+                         text("點選下方按鈕查看這場賠率", "xs", "#64748B")]},
+            "footer": {"type": "box", "layout": "vertical",
+                       "paddingAll": "12px", "contents": [
+                           button("📈 查看本場賠率", command,
+                                  "#C2410C" if league in ("NBA", "NCAA", "NBL", "TPBL")
+                                  else "#7C3AED" if league in ("MLB", "NPB", "KBO", "CPBL", "MiLB")
+                                  else "#0F766E"),
+                           button("↩ 返回聯盟選單", origin + "賠率", "#334155")]}}
+        bubbles.append(bubble)
+    if len(bubbles) == 1:
+        contents = bubbles[0]
+    else:
+        contents = {"type": "carousel", "contents": bubbles[:12]}
+    return {"type": "flex", "altText": heading + "｜左右滑動選擇比賽",
+            "quickReply": quick_menu(), "contents": contents}
+
+
+def odds_single_match_card(provider: str, league: str, item: dict) -> dict:
+    """Show only the selected matchup with its verified API quote."""
+    source = "娛樂平台" if provider == "platform" else "台灣運彩"
+    body_lines = format_book(item).split("\\n")
+    rows = [text(line, "sm", "#334155") for line in body_lines]
+    rows.append(text("單次來源快照｜僅供資訊參考，非即時盤口",
+                     "xs", "#64748B"))
+    return {"type": "flex", "altText": league + "｜" + str(item.get("home")) +
+            " VS " + str(item.get("away")) + " 賠率分析",
+            "quickReply": quick_menu(),
+            "contents": {"type": "bubble", "size": "kilo",
+                "header": {"type": "box", "layout": "vertical", "paddingAll": "16px",
+                           "backgroundColor": "#0F172A",
+                           "contents": [text("📊 " + league + "｜賠率分析", "lg", "#FFFFFF", "bold"),
+                                        text(str(item.get("home")) + " VS " + str(item.get("away")),
+                                             "sm", "#CBD5E1")]},
+                "body": {"type": "box", "layout": "vertical", "spacing": "md",
+                         "paddingAll": "14px", "contents": rows},
+                "footer": {"type": "box", "layout": "vertical", "spacing": "sm",
+                           "contents": [button("↩ 選擇其他賽事", "賠率" + source + league, "#334155"),
+                                        button("🏠 回主選單", MENU, "#334155")]}}}
+
+
 def odds_category_menu() -> dict:
     return {"type": "flex", "altText": "賠率分析｜選擇來源",
             "quickReply": quick_menu(),
@@ -1495,6 +1561,27 @@ class Controller:
             return [date_category_menu(TODAY)]
         if compact in ("台灣運彩賠率", "娛樂平台賠率"):
             return [odds_league_menu(compact)]
+        selected_odds = re.fullmatch(
+            r"賠率單場(台灣運彩|娛樂平台)(英超|西甲|德甲|義甲|法甲|歐冠|NBA|NCAA|NBL|TPBL|MLB|NPB|KBO|CPBL|MiLB)#([0-9]{1,2})",
+            compact)
+        if selected_odds:
+            source, league_name, slot = selected_odds.groups()
+            provider = "tw" if source == "台灣運彩" else "platform"
+            # No API call for platform detail clicks: read only the daily snapshot.
+            if provider == "platform":
+                daily = self.odds.daily
+                if (daily.get("day") != datetime.now(TZ).strftime("%Y-%m-%d")
+                        or daily.get("league") != league_name):
+                    return [{"type": "text", "text": "本日賠率快取尚未建立或已過期，請重新選擇聯盟。",
+                             "quickReply": quick_menu()}]
+                records = daily.get("rows", [])
+            else:
+                records = self.odds.cache.get(("tw", league_name, datetime.now(TZ).strftime("%Y-%m-%d")), (0, []))[1]
+            index = int(slot)
+            if not isinstance(records, list) or index >= len(records):
+                return [{"type": "text", "text": "本場賠率已失效，請回到賠率選單重新查詢。",
+                         "quickReply": quick_menu()}]
+            return [odds_single_match_card(provider, league_name, records[index])]
         match_odds = re.fullmatch(r"賠率(台灣運彩|娛樂平台)(英超|西甲|德甲|義甲|法甲|歐冠|NBA|NCAA|NBL|TPBL|MLB|NPB|KBO|CPBL|MiLB)", compact)
         if match_odds:
             source, league_name = match_odds.groups()
@@ -1515,29 +1602,7 @@ class Controller:
                               "目前沒有可驗證賠率資料。")
                     return [{"type":"text","text":f"{source}｜{league_name}：{reason}","quickReply":quick_menu()}]
                 return [{"type":"text","text":f"{source}｜{league_name} 今日尚無可核實賠率資料（或資料源暫時無法連線）。","quickReply":quick_menu()}]
-            if provider == "platform":
-                # The API call returns the selected league's available games.
-                # Display every returned fixture, not just the first matchup.
-                lines = [format_book(row) for row in data]
-                stamp = "📊 " + league_name + "｜本次取得 " + str(len(lines)) + " 場賽事賠率（同一來源快照）"
-                footer = "📌 今日僅查詢一次 API；重複查看沿用快取，賠率並非即時更新。"
-                chunks = []
-                current = stamp
-                for line in lines:
-                    if len(current) + len(line) + 2 > 4300:
-                        chunks.append(current)
-                        current = stamp + "（續）"
-                    current += "\n\n" + line
-                chunks.append(current)
-                if len(chunks) > 5:
-                    chunks = chunks[:5]
-                    chunks[-1] = chunks[-1][:4200] + "\n資料過多，僅顯示前五則訊息。"
-                else:
-                    chunks[-1] = chunks[-1][:4500] + "\n\n" + footer
-                return [{"type":"text", "text":value, "quickReply":quick_menu()}
-                        for value in chunks]
-            lines=[format_book(row) for row in data[:4]]
-            return [{"type":"text","text":"\n\n".join(lines)[:4700],"quickReply":quick_menu()}]
+            return [odds_fixture_picker(provider, league_name, data)]
         if compact in KEYS:
             key = KEYS[compact]
             return [fixture_cards(key, await self.fixtures.get(key), self.ui.team_zh)]
