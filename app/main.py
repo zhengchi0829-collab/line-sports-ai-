@@ -134,7 +134,10 @@ async def startup_probe(app):
                 if len(snapshot_odds) > 4:
                     example_cards.append(
                         odds_fixture_picker("tw", "足球", snapshot_odds, {}, page=1))
-                assert "賠率頁台灣運彩足球#1" in str(example_cards[-1]) if len(snapshot_odds) > 4 else True
+                if len(snapshot_odds) > 4:
+                    assert "賠率頁台灣運彩足球#1" in str(example_cards[0])
+                    assert "賠率頁台灣運彩足球#0" in str(example_cards[-1])
+                    assert "賠率單場台灣運彩足球#4" in str(example_cards[-1])
                 checked = await app.state.line_client.post(
                     "https://api.line.me/v2/bot/message/validate/reply",
                     headers=headers, json={"messages": holographic_messages(example_cards)})
