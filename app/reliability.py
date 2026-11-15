@@ -1036,6 +1036,9 @@ def odds_single_match_card(provider: str, league: str, item: dict,
                              *rows]},
                 "footer": {"type": "box", "layout": "vertical", "spacing": "sm",
                            "contents": [button("↩ 選擇其他賽事", "賠率" + source + league, "#334155"),
+                                        button("📂 返回聯賽分類",
+                                               "賠率分類" + source + odds_sport_for_league(league),
+                                               "#334155"),
                                         button("🏠 回主選單", MENU, "#334155")]}}}
 
 
@@ -1966,6 +1969,41 @@ class Controller:
             return [date_category_menu(TODAY)]
         if compact in ("台灣運彩賠率", "娛樂平台賠率"):
             return [odds_league_menu(compact)]
+        odds_sport = re.fullmatch(
+            r"賠率分類(台灣運彩|娛樂平台)(足球|籃球|棒球)", compact)
+        if odds_sport:
+            source, sport = odds_sport.groups()
+            return [odds_league_menu(source + "賠率", sport)]
+        odds_page = re.fullmatch(
+            r"賠率頁(台灣運彩|娛樂平台)(足球|英超|西甲|德甲|義甲|法甲|歐冠|NBA|NCAA|NBL|TPBL|MLB|NPB|KBO|CPBL|MiLB)#([0-9]{1,2})",
+            compact)
+        if odds_page:
+            source, league_name, page = odds_page.groups()
+            provider = "tw" if source == "台灣運彩" else "platform"
+            today = datetime.now(TZ).strftime("%Y-%m-%d")
+            if provider == "tw":
+                official = self.odds.official_daily_rows(league_name, today)
+                if not official and not jbot_trial_access(user_id):
+                    return [empty_state_card(
+                        "台灣運彩｜資料狀態",
+                        "今日沒有可核實的官網盤口，請返回球類選單。",
+                        category="賠率", error=True, back="台灣運彩賠率")]
+                data = official or self.odds.cache.get(
+                    ("tw", league_name, today), (0, []))[1]
+            else:
+                if self.odds.daily.get("day") != today:
+                    return [empty_state_card(
+                        "娛樂平台｜資料過期", "請重新選擇聯賽取得今日資料。",
+                        category="賠率", error=True, back="娛樂平台賠率")]
+                data = self.odds.stored_platform_rows(league_name)
+            if not data:
+                return [empty_state_card(
+                    source + "｜" + league_name, "目前沒有可顯示的賽事賠率紀錄。",
+                    category="賠率", back="賠率分類" +
+                    source + odds_sport_for_league(league_name))]
+            return [odds_fixture_picker(
+                provider, league_name, data,
+                odds_logo_lookup(self.fixtures, league_name), page=int(page))]
         selected_odds = re.fullmatch(
             r"賠率單場(台灣運彩|娛樂平台)(足球|英超|西甲|德甲|義甲|法甲|歐冠|NBA|NCAA|NBL|TPBL|MLB|NPB|KBO|CPBL|MiLB)#([0-9]{1,2})",
             compact)
