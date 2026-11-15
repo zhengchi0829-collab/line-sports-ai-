@@ -1946,8 +1946,8 @@ class Controller:
                                     f"（{total}場勝率 {wins / total * 100:.0f}%）")
                             else:
                                 summaries.append(f"{team}：近五場資料尚未取得")
-                        return ("歐冠近五場資料不足：\\n" + "\\n".join(summaries)
-                                + "\\n未滿五場，不提供推薦或比分模型。",
+                        return ("歐冠近五場資料不足：\n" + "\n".join(summaries)
+                                + "\n未滿五場，不提供推薦或比分模型。",
                                 "歐冠球員資料尚未核實；不根據不足樣本推薦。",
                                 None, None)
                     return ("雙方歷史最近五場資料不完整，暫無可驗證的五場勝率。",
