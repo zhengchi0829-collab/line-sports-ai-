@@ -27,7 +27,8 @@ from .reliability import (Controller, Game, Snapshot, SPORTS, TZ, VERSION,
                           fixture_cards, notice, quick_menu, date_category_menu,
                           date_league_menu, odds_category_menu, odds_league_menu, odds_source_card,
                           select_games, SPECIFIED, holographic_messages,
-                          odds_fixture_picker, odds_single_match_card)
+                          odds_fixture_picker, odds_single_match_card,
+                          odds_today_available, odds_available_menu)
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
 log = logging.getLogger("sports_bot")
@@ -105,6 +106,25 @@ async def startup_probe(app):
             assert "讓分分析：尚無完整實際盤口" in card_text
             assert "大小分分析：尚無完整實際盤口" in card_text
             log.info("tw_odds_market_analysis=passed count=%s", len(today_tw))
+        today_available = odds_today_available(app.state.controller.odds)
+        if sum(today_available.values()):
+            home_menu = (await app.state.controller.reply("台灣運彩賠率"))[0]
+            assert "台彩已更新" in str(home_menu)
+            available_menu = (await app.state.controller.reply("台彩已更新"))[0]
+            for league, count in today_available.items():
+                if count:
+                    assert "賠率台灣運彩" + league in str(available_menu)
+                    event_menu = (await app.state.controller.reply(
+                        "賠率台灣運彩" + league))[0]
+                    assert "獨贏｜" in str(event_menu)
+            missing_leagues = [league for league, count in today_available.items()
+                               if count == 0]
+            if missing_leagues:
+                missing_card = (await app.state.controller.reply(
+                    "賠率台灣運彩" + missing_leagues[0]))[0]
+                assert "台彩已更新" in str(missing_card)
+            log.info("tw_odds_direct_availability=passed total=%s",
+                     sum(today_available.values()))
         png = fallback_team_badge("測試隊", "足球")
         assert png.startswith(bytes.fromhex("89504e470d0a1a0a")) and 200 < len(png) < 50000
         log.info("team_logo_local_png_selfcheck=passed bytes=%d", len(png))
@@ -123,9 +143,12 @@ async def startup_probe(app):
                          date_category_menu("未來賽事"),
                          odds_category_menu(), odds_source_card("台灣運彩賠率"),
                          odds_source_card("娛樂平台賠率"),
-                         odds_league_menu("台灣運彩賠率"),
+                         odds_league_menu("台灣運彩賠率",
+                                          available=today_available),
+                         odds_available_menu(today_available),
                          odds_league_menu("娛樂平台賠率"),
-                         *(odds_league_menu(provider, sport)
+                         *(odds_league_menu(provider, sport,
+                              today_available if provider == "台灣運彩賠率" else None)
                            for provider in ("台灣運彩賠率", "娛樂平台賠率")
                            for sport in ("足球", "籃球", "棒球"))]
             for batch_index in range(0, len(new_cards), 5):
