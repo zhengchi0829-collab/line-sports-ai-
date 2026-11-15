@@ -294,6 +294,7 @@ class OddsGateway:
         self.daily_file = Path(os.getenv("ODDS_DAILY_CACHE_PATH", "/tmp/line_sports_odds_daily.json"))
         self.daily = self._read_daily()
         self.public_blob_cache = {}
+        self.official_snapshot_file = Path(__file__).resolve().parent / "tw_official_odds.json"
         # Free JBot trial is shared across ALL developers. Only manual requests;
         # durable-on-instance daily cache avoids spending on repeated taps.
         self.jbot_trial_file = Path(os.getenv("JBOT_TRIAL_CACHE_PATH", "/tmp/line_sports_jbot_trial.json"))
@@ -559,9 +560,74 @@ class OddsGateway:
             self.cache[("tw", league, date)] = (time.monotonic(), matching)
             return matching
 
+    def official_daily_rows(self, league, day):
+        """Read a verified, date-stamped sportslottery.com.tw odds snapshot.
+
+        The scheduled assistant may update this repository JSON ONLY after
+        successfully reading authorized official data. An empty placeholder
+        must never be presented as real quotes.
+        """
+        try:
+            record = json.loads(self.official_snapshot_file.read_text(encoding="utf-8"))
+            if not isinstance(record, dict) or record.get("day") != day:
+                return []
+            if record.get("source_url") != (
+                    "https://www.sportslottery.com.tw/sportsbook/daily-coupons"):
+                return []
+            captured_at = parse_time(record.get("captured_at"))
+            if captured_at is None or captured_at.strftime("%Y-%m-%d") != day:
+                return []
+            leagues = record.get("leagues")
+            if not isinstance(leagues, dict) or league not in JSPORTS:
+                return []
+            raw_rows = leagues.get(league)
+            if not isinstance(raw_rows, list):
+                return []
+            output = []
+            for row in raw_rows:
+                if not isinstance(row, dict):
+                    continue
+                # Keep the external snapshot isolated from provider labels.
+                clean = {
+                    "source": "台灣運彩官網賽事表（每日快照）",
+                    "book": "台灣運彩",
+                    "updated": captured_at.isoformat(),
+                    "home": str(row.get("home") or "").strip(),
+                    "away": str(row.get("away") or "").strip(),
+                    "start": str(row.get("start") or ""),
+                    "home_price": number(row.get("home_price")),
+                    "away_price": number(row.get("away_price")),
+                    "draw_price": number(row.get("draw_price")),
+                    "spread": number(row.get("spread")),
+                    "spread_home_price": number(row.get("spread_home_price")),
+                    "spread_away_price": number(row.get("spread_away_price")),
+                    "total": number(row.get("total")),
+                    "over_price": number(row.get("over_price")),
+                    "under_price": number(row.get("under_price")),
+                }
+                # Accept complete paired markets only; never synthesize a price.
+                if (clean["home_price"] is None or clean["away_price"] is None):
+                    clean["home_price"] = clean["away_price"] = clean["draw_price"] = None
+                if (clean["spread"] is None or clean["spread_home_price"] is None
+                        or clean["spread_away_price"] is None):
+                    clean["spread"] = clean["spread_home_price"] = clean["spread_away_price"] = None
+                if (clean["total"] is None or clean["over_price"] is None
+                        or clean["under_price"] is None):
+                    clean["total"] = clean["over_price"] = clean["under_price"] = None
+                output.append(clean)
+            result = verified_taiwan_rows(output, day)
+            self.cache[("tw", league, day)] = (time.monotonic(), result)
+            return result
+        except (OSError, ValueError, TypeError):
+            return []
+
     async def feed(self, provider, league, date):
         if provider != "tw":
             return await self._daily_platform_feed(league)
+        # Daily official snapshot takes priority over JBot trial quotes.
+        official = self.official_daily_rows(league, date)
+        if official:
+            return official
         key = os.getenv("JBOT_API_TOKEN", "").strip()
         if not key:
             self.jbot_status[league] = "missing_key"
