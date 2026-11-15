@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from .team_names import chinese_name, bilingual_name
+from .team_logos import team_logo_url
 from fastapi import FastAPI, Header, HTTPException, Request
 
 app = FastAPI(title="體育AI分析系統", version="0.6.66")
@@ -632,14 +633,9 @@ async def upcoming_match_cards(sport):
         if len(command) > 300:
             continue
         def team_row(name, logo):
-            items = []
-            if isinstance(logo, str) and logo.startswith("https://"):
-                # LINE Flex does not reliably render SVG logos. Convert source logos
-                # to small PNGs via a public image CDN before LINE fetches them.
-                from urllib.parse import quote
-                png_url = "https://wsrv.nl/?url=" + quote(logo, safe="") + "&w=128&h=128&fit=contain&output=png"
-                items.append({"type": "image", "url": png_url, "size": "64px",
-                              "aspectMode": "fit", "aspectRatio": "1:1", "flex": 0})
+            items = [{"type": "image", "url": team_logo_url(name, logo, sport),
+                      "size": "64px", "aspectMode": "fit", "aspectRatio": "1:1",
+                      "flex": 0}]
             items.append({"type": "text", "text": name, "weight": "bold", "size": "md", "color": "#0F172A", "wrap": True, "flex": 1})
             return {"type": "box", "layout": "horizontal", "alignItems": "center", "spacing": "md", "contents": items}
         bubbles.append({
