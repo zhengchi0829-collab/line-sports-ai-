@@ -142,6 +142,26 @@ def parse_time(raw):
     except ValueError:
         return None
 
+def verified_taiwan_rows(rows, date):
+    """Exclude missing-date, unrelated-day, and empty quotes from TW displays."""
+    verified = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        when = parse_time(row.get("start"))
+        if when is None or when.strftime("%Y-%m-%d") != date:
+            continue
+        if not row.get("home") or not row.get("away"):
+            continue
+        if not any(number(row.get(field)) is not None and number(row.get(field)) > 1
+                   for field in ("home_price", "away_price", "draw_price",
+                                 "spread_home_price", "spread_away_price",
+                                 "over_price", "under_price")):
+            continue
+        verified.append(row)
+    return verified
+
+
 def format_book(book, predicted=None):
     parts=[book["source"] + "｜" + book["book"],
            book["home"]+" vs "+book["away"]]
@@ -447,7 +467,7 @@ class OddsGateway:
             if not kind:
                 return []
             if not key:
-                data = await self._public_blob_feed(league, date)
+                data = verified_taiwan_rows(await self._public_blob_feed(league, date), date)
                 if data:
                     self.cache[cache_key] = (time.monotonic(), data)
                 return data
@@ -461,7 +481,7 @@ class OddsGateway:
                     headers={"X-JBot-Token": key}, timeout=5,
                 )
                 if response.status_code == 200:
-                    data = jbot_normalize(response.json())
+                    data = verified_taiwan_rows(jbot_normalize(response.json()), date)
             except (httpx.HTTPError, ValueError, TypeError, KeyError):
                 data = []
             if data:
