@@ -1,0 +1,36 @@
+name: LINE Sports AI - ten-minute monitor
+
+on:
+  schedule:
+    # Avoid minute 0 (GitHub's busiest scheduler minute).
+    - cron: "7,17,27,37,47,57 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: line-sports-ai-health
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Render bot and feature status
+        id: health
+        continue-on-error: true
+        run: python3 scripts/monitor_bot.py --report "${RUNNER_TEMP}/monitor-report.txt"
+      - name: Open or resolve an incident
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MONITOR_RESULT: ${{ steps.health.outcome }}
+          MONITOR_REPORT: ${{ runner.temp }}/monitor-report.txt
+        run: python3 scripts/monitor_issue.py
+      - name: Mark unhealthy check as failed
+        if: steps.health.outcome != 'success'
+        run: exit 1
