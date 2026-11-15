@@ -1012,7 +1012,7 @@ def odds_single_match_card(provider: str, league: str, item: dict,
 def jbot_trial_access(user_id: str | None) -> bool:
     """Free JBot evaluation is for the authorized tester, never the public bot."""
     allowed = {entry.strip() for entry in re.split(
-        r"[,;\\s]+", os.getenv("JBOT_TRIAL_USER_IDS", "")) if entry.strip()}
+        r"[,;\s]+", os.getenv("JBOT_TRIAL_USER_IDS", "")) if entry.strip()}
     return bool(user_id and user_id in allowed)
 
 
@@ -1862,7 +1862,7 @@ class Controller:
         compact = re.sub(r"\s+", "", raw)
         if compact in ("我的LINEID", "我的LINE用戶ID"):
             return [{"type": "text",
-                     "text": ("你的 LINE userId：\\n" + user_id) if user_id
+                     "text": ("你的 LINE userId：\n" + user_id) if user_id
                              else "請在 LINE 聊天室內發送這個指令。",
                      "quickReply": quick_menu()}]
         if compact == "足球":
