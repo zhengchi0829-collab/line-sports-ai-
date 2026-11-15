@@ -1197,6 +1197,25 @@ def odds_league_menu(provider: str, sport: str | None = None,
                          "spacing": "sm", "paddingAll": "14px",
                          "contents": actions}}}
 
+
+def odds_missing_snapshot_card(league: str, available: dict[str, int]) -> dict:
+    """Show exact missing league and a one-tap route to actual available prices."""
+    ready = [(name, count) for name, count in available.items() if count]
+    existing = "、".join(f"{name} {count} 場" for name, count in ready[:5])
+    explanation = (f"今日「{league}」尚未取得可核實的台彩賠率。"
+                   + (f"目前只有 {existing} 已同步；可點下方查看。"
+                      if existing else "目前沒有已同步的台彩賠率。")
+                   + " 官網存取受限時不會產生模擬盤口。")
+    card = empty_state_card("台灣運彩｜" + league, explanation,
+                            category="賠率", back="台灣運彩賠率")
+    if ready:
+        card["contents"]["footer"]["contents"].insert(
+            -1, button(f"✅ 查看今日已更新 {sum(available.values())} 場",
+                       "台彩已更新", "#0F766E"))
+    return card
+
+
+
 def odds_source_card(provider: str) -> dict:
     official = provider == "台灣運彩賠率"
     desc = ("台灣運彩即時盤口需在 Render 設定 JBOT_API_TOKEN；目前尚未完成授權資料接入。"
@@ -2038,12 +2057,18 @@ class Controller:
         if compact == "賽事分析":
             return [date_category_menu(TODAY)]
         if compact in ("台灣運彩賠率", "娛樂平台賠率"):
-            return [odds_league_menu(compact)]
+            available = (odds_today_available(self.odds)
+                         if compact == "台灣運彩賠率" else None)
+            return [odds_league_menu(compact, available=available)]
+        if compact == "台彩已更新":
+            return [odds_available_menu(odds_today_available(self.odds))]
         odds_sport = re.fullmatch(
             r"賠率分類(台灣運彩|娛樂平台)(足球|籃球|棒球)", compact)
         if odds_sport:
             source, sport = odds_sport.groups()
-            return [odds_league_menu(source + "賠率", sport)]
+            available = (odds_today_available(self.odds)
+                         if source == "台灣運彩" else None)
+            return [odds_league_menu(source + "賠率", sport, available)]
         odds_page = re.fullmatch(
             r"賠率頁(台灣運彩|娛樂平台)(足球|英超|西甲|德甲|義甲|法甲|歐冠|NBA|NCAA|NBL|TPBL|MLB|NPB|KBO|CPBL|MiLB)#([0-9]{1,2})",
             compact)
@@ -2054,10 +2079,8 @@ class Controller:
             if provider == "tw":
                 official = self.odds.official_daily_rows(league_name, today)
                 if not official and not jbot_trial_access(user_id):
-                    return [empty_state_card(
-                        "台灣運彩｜資料狀態",
-                        "今日沒有可核實的官網盤口，請返回球類選單。",
-                        category="賠率", error=True, back="台灣運彩賠率")]
+                    return [odds_missing_snapshot_card(
+                        league_name, odds_today_available(self.odds))]
                 data = official or self.odds.cache.get(
                     ("tw", league_name, today), (0, []))[1]
             else:
@@ -2084,9 +2107,8 @@ class Controller:
                 league_name, datetime.now(TZ).strftime("%Y-%m-%d"))
                 if provider == "tw" else [])
             if provider == "tw" and not official_records and not jbot_trial_access(user_id):
-                return [empty_state_card("台灣運彩資料狀態",
-                                         "今日尚無已核實的官網賠率快照；JBot 試用僅限指定 LINE 帳號。",
-                                         category="賠率", error=True, back="台灣運彩賠率")]
+                return [odds_missing_snapshot_card(
+                    league_name, odds_today_available(self.odds))]
             # No API call for platform detail clicks: read only the daily snapshot.
             if provider == "platform":
                 daily = self.odds.daily
@@ -2114,14 +2136,9 @@ class Controller:
                     return [odds_fixture_picker(
                         "tw", league_name, official,
                         odds_logo_lookup(self.fixtures, league_name))]
-                if not os.getenv("JBOT_API_TOKEN", "").strip():
-                    return [empty_state_card("台灣運彩｜每日官網快照",
-                                             "今日尚未取得可核實的官網賠率。每日檢查不代表官網允許資料擷取；目前沒有可顯示的真實盤口。",
-                                             category="賠率", error=True, back="台灣運彩賠率")]
-                if not jbot_trial_access(user_id):
-                    return [empty_state_card("台灣運彩｜資料狀態",
-                                             "今日尚無可核實的官網賠率快照。JBot 免費試用僅限指定 LINE 帳號手動測試。",
-                                             category="賠率", error=True, back="台灣運彩賠率")]
+                if not os.getenv("JBOT_API_TOKEN", "").strip() or not jbot_trial_access(user_id):
+                    return [odds_missing_snapshot_card(
+                        league_name, odds_today_available(self.odds))]
             else:
                 configured = bool((os.getenv("ODDS_API_KEY") or
                                    os.getenv("THE_ODDS_API_KEY") or "").strip())
