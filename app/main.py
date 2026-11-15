@@ -74,12 +74,17 @@ async def startup_probe(app):
         odds_ui = odds_category_menu()
         odds_actions = str(odds_ui)
         assert "台灣運彩賠率" in odds_actions and "娛樂平台賠率" in odds_actions
-        for provider, prefix in (("台灣運彩賠率", "賠率台灣運彩"),
-                                 ("娛樂平台賠率", "賠率娛樂平台")):
-            league_menu = odds_league_menu(provider)
-            choices = str(league_menu)
-            assert prefix + "NBA" in choices and prefix + "MLB" in choices
-            assert "返回賠率分類" in choices
+        for provider in ("台灣運彩賠率", "娛樂平台賠率"):
+            source = provider.removesuffix("賠率")
+            sport_menu = odds_league_menu(provider)
+            top = str(sport_menu)
+            for sport, league in (("足球", "英超"), ("籃球", "NBA"), ("棒球", "MLB")):
+                assert "賠率分類" + source + sport in top
+                league_menu = odds_league_menu(provider, sport)
+                choices = str(league_menu)
+                assert "賠率" + source + league in choices
+                assert "返回球類分類" in choices
+            assert "賠率" + source + "英超" not in top  # hidden until chosen
         no_odds = await app.state.controller.reply("分析NBA 未驗證主隊 vs 未驗證客隊")
         assert not any("獨贏賠率" in str(card) or "真實盤口" in str(card)
                        or "盤口更新：" in str(card) for card in no_odds)
@@ -102,7 +107,10 @@ async def startup_probe(app):
                          odds_category_menu(), odds_source_card("台灣運彩賠率"),
                          odds_source_card("娛樂平台賠率"),
                          odds_league_menu("台灣運彩賠率"),
-                         odds_league_menu("娛樂平台賠率")]
+                         odds_league_menu("娛樂平台賠率"),
+                         *(odds_league_menu(provider, sport)
+                           for provider in ("台灣運彩賠率", "娛樂平台賠率")
+                           for sport in ("足球", "籃球", "棒球"))]
             for batch_index in range(0, len(new_cards), 5):
                 # LINE validation accepts at most five messages per request.
                 group = new_cards[batch_index:batch_index + 5]
@@ -120,9 +128,13 @@ async def startup_probe(app):
                 "足球", datetime.now(TZ).strftime("%Y-%m-%d"))
             if snapshot_odds:
                 example_cards = [
-                    odds_fixture_picker("tw", "足球", snapshot_odds, {}),
+                    odds_fixture_picker("tw", "足球", snapshot_odds, {}, page=0),
                     odds_single_match_card("tw", "足球", snapshot_odds[0], {}),
                 ]
+                if len(snapshot_odds) > 4:
+                    example_cards.append(
+                        odds_fixture_picker("tw", "足球", snapshot_odds, {}, page=1))
+                assert "賠率頁台灣運彩足球#1" in str(example_cards[-1]) if len(snapshot_odds) > 4 else True
                 checked = await app.state.line_client.post(
                     "https://api.line.me/v2/bot/message/validate/reply",
                     headers=headers, json={"messages": holographic_messages(example_cards)})
