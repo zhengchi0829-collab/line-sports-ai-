@@ -200,6 +200,100 @@ def format_book(book, predicted=None):
     if book.get("updated"):parts.append("盤口更新："+book["updated"][:19])
     return "\n".join(parts)
 
+
+def odds_market_insights(book, *, soccer=False):
+    """Explain only observed sportsbook prices, not invented model forecasts.
+
+    Every number comes from the same actual quoted market in `book`.
+    Normalization removes the bookmaker's summed implied probability; it
+    cannot be interpreted as an independently estimated team win rate.
+    """
+    def probability(value):
+        price = number(value)
+        return 1.0 / price if price is not None and price > 1 else None
+
+    def normalize(pairs):
+        raw = [(label, probability(price)) for label, price in pairs]
+        if any(value is None for _, value in raw):
+            return None
+        total = sum(value for _, value in raw)
+        if total <= 0:
+            return None
+        return [(label, value / total) for label, value in raw]
+
+    result = []
+    takeaways = []
+    winner = [
+        ("主隊", book.get("home_price")),
+        ("客隊", book.get("away_price")),
+    ]
+    if soccer:
+        winner.append(("和局", book.get("draw_price")))
+    elif probability(book.get("draw_price")) is not None:
+        winner.append(("和局", book.get("draw_price")))
+
+    outcomes = normalize(winner)
+    if outcomes:
+        ordered = sorted(outcomes, key=lambda pair: pair[1], reverse=True)
+        leader, share = ordered[0]
+        gap = share - ordered[1][1]
+        if gap < 0.03:
+            result.append("🏆 獨贏分析：市場價格接近，暫無明顯傾向")
+            takeaways.append("獨贏接近均勢")
+        else:
+            result.append(f"🏆 獨贏分析：市場較看好{leader}（去抽水約 {share*100:.1f}%）")
+            takeaways.append("獨贏盤偏向" + leader)
+        implied = [probability(price) for _, price in winner]
+        total = sum(implied)
+        if total >= 0.999:
+            result.append(f"📊 獨贏盤口總隱含機率 {total*100:.1f}%（含莊家水位）")
+    elif soccer and probability(book.get("home_price")) and probability(book.get("away_price")):
+        result.append("🏆 獨贏分析：缺少和局賠率，無法完整比較三項市場")
+    else:
+        result.append("🏆 獨贏分析：缺少完整雙方賠率")
+
+    handicap = number(book.get("spread"))
+    handicap_prices = normalize([
+        ("主隊", book.get("spread_home_price")),
+        ("客隊", book.get("spread_away_price")),
+    ]) if handicap is not None else None
+    if handicap_prices:
+        h_label, h_prob = max(handicap_prices, key=lambda pair: pair[1])
+        gap = abs(handicap_prices[0][1] - handicap_prices[1][1])
+        if gap >= 0.03:
+            result.append(
+                f"⚖️ 讓分分析：主隊 {handicap:+g}，市場水位略偏{h_label}"
+                f"（去抽水約 {h_prob*100:.1f}%）")
+            takeaways.append("讓分水位偏" + h_label)
+        else:
+            result.append(f"⚖️ 讓分分析：主隊 {handicap:+g}，雙方水位接近")
+    else:
+        result.append("⚖️ 讓分分析：尚無完整實際盤口")
+
+    total_line = number(book.get("total"))
+    total_prices = normalize([
+        ("大分", book.get("over_price")),
+        ("小分", book.get("under_price")),
+    ]) if total_line is not None and total_line > 0 else None
+    if total_prices:
+        t_label, t_prob = max(total_prices, key=lambda pair: pair[1])
+        gap = abs(total_prices[0][1] - total_prices[1][1])
+        if gap >= 0.03:
+            result.append(
+                f"📈 大小分分析：{total_line:g}，水位略偏{t_label}"
+                f"（去抽水約 {t_prob*100:.1f}%）")
+            takeaways.append("大小分水位偏" + t_label)
+        else:
+            result.append(f"📈 大小分分析：{total_line:g}，大小分水位接近")
+    else:
+        result.append("📈 大小分分析：尚無完整實際盤口")
+
+    result.append("🧭 盤口結論：" + ("；".join(takeaways) if takeaways
+                                      else "目前無法得出可靠的市場傾向"))
+    result.append("⚠️ 僅反映當時賠率與相對市場定價；非獨立勝率預測或保證獲利推薦")
+    return result
+
+
 # Read-only public Blob format documented by community projects. Not an
 # authenticated or guaranteed official API. Never bypass a blocked response.
 BLOB_SPORTS = {"NBA": 442, "MLB": 443}
