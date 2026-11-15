@@ -20,7 +20,7 @@ KEYS = {
     "MLB": "baseball_mlb",
 }
 JSPORTS = {
-    "英超": "FTB", "西甲": "FTB", "德甲": "FTB", "義甲": "FTB",
+    "足球": "FTB", "英超": "FTB", "西甲": "FTB", "德甲": "FTB", "義甲": "FTB",
     "法甲": "FTB", "歐冠": "FTB", "NBA": "NBA", "NCAA": "BSK",
     "NBL": "BSK", "TPBL": "BSK", "MLB": "MLB",
     "NPB": "NPB", "KBO": "KBO", "CPBL": "CPB", "MiLB": "BSE",
@@ -589,7 +589,9 @@ class OddsGateway:
                     continue
                 # Keep the external snapshot isolated from provider labels.
                 clean = {
-                    "source": "台灣運彩官網賽事表（每日快照）",
+                    "source": ("台灣運彩官網截圖（人工核對）"
+                               if record.get("capture_method") == "user_screenshot"
+                               else "台灣運彩官網賽事表（每日快照）"),
                     "book": "台灣運彩",
                     "updated": captured_at.isoformat(),
                     "home": str(row.get("home") or "").strip(),
