@@ -606,13 +606,16 @@ class OddsGateway:
                     "under_price": number(row.get("under_price")),
                 }
                 # Accept complete paired markets only; never synthesize a price.
-                if (clean["home_price"] is None or clean["away_price"] is None):
+                if (not clean["home_price"] or clean["home_price"] <= 1
+                        or not clean["away_price"] or clean["away_price"] <= 1):
                     clean["home_price"] = clean["away_price"] = clean["draw_price"] = None
-                if (clean["spread"] is None or clean["spread_home_price"] is None
-                        or clean["spread_away_price"] is None):
+                if (clean["spread"] is None
+                        or not clean["spread_home_price"] or clean["spread_home_price"] <= 1
+                        or not clean["spread_away_price"] or clean["spread_away_price"] <= 1):
                     clean["spread"] = clean["spread_home_price"] = clean["spread_away_price"] = None
-                if (clean["total"] is None or clean["over_price"] is None
-                        or clean["under_price"] is None):
+                if (clean["total"] is None or clean["total"] <= 0
+                        or not clean["over_price"] or clean["over_price"] <= 1
+                        or not clean["under_price"] or clean["under_price"] <= 1):
                     clean["total"] = clean["over_price"] = clean["under_price"] = None
                 output.append(clean)
             result = verified_taiwan_rows(output, day)
