@@ -733,7 +733,7 @@ NBA_ESPN_SLUGS = {
     "Atlanta Hawks":"atl", "Boston Celtics":"bos", "Brooklyn Nets":"bkn",
     "Charlotte Hornets":"cha", "Chicago Bulls":"chi", "Cleveland Cavaliers":"cle",
     "Dallas Mavericks":"dal", "Denver Nuggets":"den", "Detroit Pistons":"det",
-    "Golden State Warriors":"gs", "Houston Rockets":"hou", "Indiana Pacers":"ind",
+    "Golden State Warriors":"gsw", "Houston Rockets":"hou", "Indiana Pacers":"ind",
     "LA Clippers":"lac", "Los Angeles Clippers":"lac", "Los Angeles Lakers":"lal",
     "Memphis Grizzlies":"mem", "Miami Heat":"mia", "Milwaukee Bucks":"mil",
     "Minnesota Timberwolves":"min", "New Orleans Pelicans":"no",
@@ -741,7 +741,27 @@ NBA_ESPN_SLUGS = {
     "Orlando Magic":"orl", "Philadelphia 76ers":"phi", "Phoenix Suns":"phx",
     "Portland Trail Blazers":"por", "Sacramento Kings":"sac",
     "San Antonio Spurs":"sa", "Toronto Raptors":"tor",
-    "Utah Jazz":"utah", "Washington Wizards":"wsh",
+    "Utah Jazz":"utah", "Washington Wizards":"was",
+}
+
+
+MLB_ESPN_SLUGS = {
+    "Los Angeles Angels":"laa", "Arizona Diamondbacks":"ari",
+    "Baltimore Orioles":"bal", "Boston Red Sox":"bos",
+    "Chicago Cubs":"chc", "Cincinnati Reds":"cin",
+    "Cleveland Guardians":"cle", "Colorado Rockies":"col",
+    "Detroit Tigers":"det", "Houston Astros":"hou",
+    "Kansas City Royals":"kc", "Los Angeles Dodgers":"lad",
+    "Washington Nationals":"wsh", "New York Mets":"nym",
+    "Athletics":"oak", "Oakland Athletics":"oak",
+    "Pittsburgh Pirates":"pit", "San Diego Padres":"sd",
+    "Seattle Mariners":"sea", "San Francisco Giants":"sf",
+    "St. Louis Cardinals":"stl", "Tampa Bay Rays":"tb",
+    "Texas Rangers":"tex", "Toronto Blue Jays":"tor",
+    "Minnesota Twins":"min", "Philadelphia Phillies":"phi",
+    "Atlanta Braves":"atl", "Chicago White Sox":"chw",
+    "Miami Marlins":"mia", "New York Yankees":"nyy",
+    "Milwaukee Brewers":"mil",
 }
 
 
@@ -755,7 +775,9 @@ def official_logo(league: str, team: str) -> str:
                 if slug:
                     return f"https://a.espncdn.com/i/teamlogos/nba/500/{slug}.png"
             if league == "MLB":
-                return f"https://www.mlbstatic.com/team-logos/{ident}.png"
+                slug = MLB_ESPN_SLUGS.get(name)
+                if slug:
+                    return f"https://a.espncdn.com/i/teamlogos/mlb/500/{slug}.png"
     return ""
 
 
