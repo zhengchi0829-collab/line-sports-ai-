@@ -405,6 +405,11 @@ def offline_analysis(sport, matchup=None, team_history=None, star_players=None, 
     # Compact, verified presentation: no invented named players or win odds.
     def brief_history(value):
         import re
+        # UCL may have fewer than five completed current-season matches.
+        # Show the verified partial W/D/L records, but not a five-game claim.
+        if sport == "足球" and league == "歐冠" and str(value).startswith(
+                "歐冠近五場資料不足："):
+            return str(value)[:180]
         lines = [line.strip() for line in str(value or "").splitlines() if line.strip()]
         picks = []
         for line in lines:
