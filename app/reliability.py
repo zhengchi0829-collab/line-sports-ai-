@@ -88,6 +88,53 @@ def final_score(value) -> int | None:
     return int(number) if number >= 0 and number.is_integer() else None
 
 
+
+def verified_form_match(event: dict, team_id: str, cutoff: datetime,
+                        *, soccer: bool) -> tuple[datetime, str, int, int] | None:
+    """Only count a completed result BEFORE the selected fixture kickoff.
+
+    For Champions League ties, ESPN's `winner` flag may represent advancement
+    on aggregate / penalties; win-draw-loss for form is based on the scored
+    goals of this one fixture, never that advancement flag.
+    """
+    if not isinstance(event, dict) or not event.get("date"):
+        return None
+    try:
+        when = instant(event["date"])
+    except (TypeError, ValueError):
+        return None
+    if when >= cutoff:
+        return None
+    comps = event.get("competitions") or []
+    if not comps or not isinstance(comps[0], dict):
+        return None
+    comp = comps[0]
+    status = comp.get("status") or event.get("status") or {}
+    kind = status.get("type") or {} if isinstance(status, dict) else {}
+    if not (kind.get("completed") is True or kind.get("state") == "post"):
+        return None
+    contestants = comp.get("competitors") or []
+    mine = next((p for p in contestants
+                 if isinstance(p, dict) and isinstance(p.get("team"), dict)
+                 and str(p["team"].get("id")) == str(team_id)), None)
+    other = next((p for p in contestants
+                  if isinstance(p, dict) and isinstance(p.get("team"), dict)
+                  and str(p["team"].get("id")) != str(team_id)), None)
+    if mine is None or other is None:
+        return None
+    mine_goals = final_score(mine.get("score"))
+    other_goals = final_score(other.get("score"))
+    if mine_goals is None or other_goals is None:
+        return None
+    if mine_goals > other_goals:
+        result = "W"
+    elif mine_goals < other_goals:
+        result = "L"
+    else:
+        result = "D" if soccer else "U"
+    return (when, result, mine_goals, other_goals) if result != "U" else None
+
+
 def score_only_card(game: Game, team_name) -> dict:
     """Completed-event response with final score only; no analysis actions."""
     home, away = team_name(game.home), team_name(game.away)
@@ -1772,7 +1819,8 @@ class Controller:
     async def team_details(self, sport, a, b, league=None,
                            as_of: date | None = None, fixture: Game | None = None):
         """Verified recent form and registered players from the selected competition."""
-        key = (sport, league, a, b, as_of)
+        key = (sport, league, a, b, as_of, fixture.ident if fixture else None,
+               fixture.start.isoformat() if fixture else None)
         cached = self.details.get(key)
         if cached and time.monotonic() - cached[0] < 1200:
             return cached[1]
@@ -1854,41 +1902,22 @@ class Controller:
                 records = []
                 scores = []
                 historical_games = []
+                # No look-ahead: exclude every match played on/after the
+                # selected UCL fixture, even if ESPN's current-season schedule
+                # already contains later final results.
+                cutoff = (fixture.start if fixture is not None else
+                          datetime.combine(as_of, datetime.min.time(), tzinfo=TZ)
+                          if as_of is not None else datetime.now(TZ))
                 for ident, response in zip(ids, responses):
                     played = []
                     if isinstance(response, httpx.Response) and response.status_code == 200:
                         for event in response.json().get("events", []):
-                            comps = event.get("competitions") or []
-                            if not comps:
-                                continue
-                            comp = comps[0]
-                            status = comp.get("status") or event.get("status") or {}
-                            if not status.get("type", {}).get("completed"):
-                                continue
-                            competitors = comp.get("competitors") or []
-                            mine = next((c for c in competitors if str(c.get("team", {}).get("id")) == ident), None)
-                            if mine is None:
-                                continue
-                            if mine.get("winner") is True:
-                                outcome = "W"
-                            elif any(c.get("winner") is True for c in competitors):
-                                outcome = "L"
-                            else:
-                                # Ties are common in football and count as played, not wins.
-                                outcome = "D" if sport == "足球" else "U"
-                            if outcome != "U":
-                                def real_score(value):
-                                    if isinstance(value, dict):
-                                        value = value.get("value", value.get("displayValue"))
-                                    try:
-                                        return float(value)
-                                    except (TypeError, ValueError):
-                                        return None
-                                mine_score = real_score(mine.get("score"))
-                                opponent = next((c for c in competitors if c is not mine), None)
-                                other_score = real_score(opponent.get("score")) if opponent else None
-                                played.append((event.get("date") or "", outcome, mine_score, other_score))
-                    played.sort(reverse=True)
+                            verified = verified_form_match(
+                                event, ident, cutoff, soccer=(sport == "足球"))
+                            if verified is not None:
+                                when, outcome, mine_score, other_score = verified
+                                played.append((when, outcome, mine_score, other_score))
+                    played.sort(key=lambda match: match[0], reverse=True)
                     # Only the last five completed games, newest first.
                     recent_games = played[:5]
                     historical_games.append(recent_games)
