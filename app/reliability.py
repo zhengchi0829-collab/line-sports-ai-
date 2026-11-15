@@ -78,7 +78,7 @@ class Game:
 def final_score(value) -> int | None:
     """Accept only actual nonnegative integer scores, not predicted points."""
     if isinstance(value, dict):
-        value = value.get("value", value.get("score"))
+        value = value.get("value", value.get("displayValue", value.get("score")))
     if value is None or isinstance(value, bool):
         return None
     try:
@@ -110,8 +110,9 @@ def verified_form_match(event: dict, team_id: str, cutoff: datetime,
         return None
     comp = comps[0]
     status = comp.get("status") or event.get("status") or {}
-    kind = status.get("type") or {} if isinstance(status, dict) else {}
-    if not (kind.get("completed") is True or kind.get("state") == "post"):
+    kind = (status.get("type") or {}) if isinstance(status, dict) else {}
+    if not isinstance(kind, dict) or not (
+            kind.get("completed") is True or kind.get("state") == "post"):
         return None
     contestants = comp.get("competitors") or []
     mine = next((p for p in contestants
@@ -1932,6 +1933,23 @@ class Controller:
                 # A real five-game form sample, not a random pick or betting probability.
                 # Both clubs require five verified finished games before a comparison.
                 if any(rec[3] != 5 for rec in records):
+                    if league == "歐冠":
+                        # Four 2026/27 league-phase matches had been played by
+                        # Nov 15; showing fabricated "last five" is misleading.
+                        # Reveal verified partial forms but disable predictions.
+                        summaries = []
+                        for name, (wins, draws, losses, total) in zip((a, b), records):
+                            team = self.ui.team_zh(name)
+                            if total:
+                                summaries.append(
+                                    f"{team}：{total}/5場 {wins}勝{draws}和{losses}敗"
+                                    f"（{total}場勝率 {wins / total * 100:.0f}%）")
+                            else:
+                                summaries.append(f"{team}：近五場資料尚未取得")
+                        return ("歐冠近五場資料不足：\\n" + "\\n".join(summaries)
+                                + "\\n未滿五場，不提供推薦或比分模型。",
+                                "歐冠球員資料尚未核實；不根據不足樣本推薦。",
+                                None, None)
                     return ("雙方歷史最近五場資料不完整，暫無可驗證的五場勝率。",
                             "球員資料待核實；不根據不足樣本推薦。", None, None)
                 rates = [rec[0] / 5 for rec in records]
@@ -2305,6 +2323,22 @@ class Controller:
                             matched_game = game
                             kickoff = game.start
                             break
+                if league == "歐冠" and matched_game is None and not requested_date:
+                    # Reject guessed matchups in a cup competition; only the
+                    # actual UCL fixture may be analyzed under that label.
+                    checked = await self.fixtures.get("soccer_ucl")
+                    for game in checked.games:
+                        if ((comparable(game.home, a) or
+                             comparable(self.ui.team_zh(game.home), a)) and
+                            (comparable(game.away, b) or
+                             comparable(self.ui.team_zh(game.away), b))):
+                            matched_game = game
+                            kickoff = game.start
+                            break
+                    if matched_game is None:
+                        return [{"type": "text", "text":
+                                 "尚未核實這場歐冠對戰與開賽時間，請從「足球 → 歐冠」的實際賽事卡片點選分析。",
+                                 "quickReply": quick_menu()}]
                 if requested_date and matched_game is None:
                     message = (f"{requested_date}｜{league} 找不到"
                                f"「{a} vs {b}」的已核實賽程，請重新選日期及賽事。")
