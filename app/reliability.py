@@ -974,7 +974,7 @@ def odds_league_menu(provider: str) -> dict:
     stopping at a credential warning. Both sources remain odds-menu only.
     """
     prefix = "台灣運彩" if provider == "台灣運彩賠率" else "娛樂平台"
-    configured = ((bool(os.getenv("JBOT_API_TOKEN", "").strip()) or True) if prefix == "台灣運彩"
+    configured = (True if prefix == "台灣運彩"
                   else bool((os.getenv("ODDS_API_KEY") or os.getenv("THE_ODDS_API_KEY") or "").strip()))
     if prefix == "台灣運彩":
         leagues = ("NBA", "MLB", "英超", "西甲", "德甲", "義甲", "法甲",
