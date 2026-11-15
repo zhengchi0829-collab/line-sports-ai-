@@ -1095,44 +1095,107 @@ def odds_sport_for_league(league: str) -> str:
     return "棒球"
 
 
-def odds_league_menu(provider: str, sport: str | None = None) -> dict:
-    """Two-step sportsbook navigation: source -> sport -> league.
+def odds_today_available(gateway: OddsGateway) -> dict[str, int]:
+    """Count only today's actually verified Taiwan lottery quotes.
 
-    A league's fixtures are never fetched merely by opening a sport category.
+    Opening a menu must never trigger an unauthorized API query or spend quota.
     """
+    today = datetime.now(TZ).strftime("%Y-%m-%d")
+    leagues = dict.fromkeys(league
+        for categories in ODDS_GROUPS["台灣運彩"].values()
+        for league in categories)
+    return {league: len(gateway.official_daily_rows(league, today))
+            for league in leagues}
+
+
+def odds_available_menu(available: dict[str, int]) -> dict:
+    """Direct entry to events with actual verified Taiwan odds today."""
+    total = sum(available.values())
+    rows = [
+        button(f"✅ {ODDS_EMOJIS[odds_sport_for_league(league)]} {league}｜{count} 場",
+               "賠率台灣運彩" + league, ODDS_COLORS[odds_sport_for_league(league)])
+        for league, count in available.items() if count
+    ]
+    if not rows:
+        rows.append(text("今日尚未有已核實的台灣運彩盤口快照。"
+                         "定時檢查不代表一定能取得官網資料；沒有盤口不產生分析。",
+                         "sm", "#CBD5E1"))
+    else:
+        rows.append(text("僅列已取得的實際台彩賠率；截圖與每日快照不是即時報價。",
+                         "xs", "#CBD5E1"))
+    rows.append(button("↩ 返回台彩賠率分類", "台灣運彩賠率", "#334155"))
+    return {"type": "flex",
+            "altText": f"今日有資料的台灣運彩賠率｜{total}場",
+            "quickReply": quick_menu(),
+            "contents": {"type": "bubble", "size": "kilo",
+                "header": {"type": "box", "layout": "vertical",
+                           "backgroundColor": "#0F172A", "paddingAll": "16px",
+                           "contents": [
+                               text("🇹🇼 今日已同步的台彩盤口", "lg", "#FFFFFF", "bold"),
+                               text(f"目前可核實 {total} 場賽事", "sm", "#CBD5E1")]},
+                "body": {"type": "box", "layout": "vertical", "spacing": "sm",
+                         "paddingAll": "14px", "contents": rows}}}
+
+
+def odds_league_menu(provider: str, sport: str | None = None,
+                     available: dict[str, int] | None = None) -> dict:
+    """Odds navigation: source -> sport -> league, with verified-data status."""
     prefix = "台灣運彩" if provider == "台灣運彩賠率" else "娛樂平台"
     groups = ODDS_GROUPS[prefix]
+    counts = available or {}
+    is_tw = prefix == "台灣運彩"
     if sport is None:
-        actions = [
-            button(ODDS_EMOJIS[category] + " " + category + "賽事",
-                   "賠率分類" + prefix + category, ODDS_COLORS[category])
-            for category in ("足球", "籃球", "棒球")
-        ]
-        description = "先選擇球類，再進入聯賽或賽事，不會一次顯示全部"
+        actions = []
+        total = sum(counts.values())
+        if is_tw:
+            actions.append(button(
+                f"✅ 今日有資料｜{total} 場（點此查看）" if total
+                else "📭 今日暫無已核實的台彩賠率",
+                "台彩已更新", "#0F766E" if total else "#334155"))
+        for category in ("足球", "籃球", "棒球"):
+            count = sum(counts.get(league, 0) for league in groups[category])
+            label = ODDS_EMOJIS[category] + " " + category + "賽事"
+            if is_tw:
+                label += f"｜{count} 場已更新" if count else "｜尚無快照"
+            actions.append(button(label, "賠率分類" + prefix + category,
+                                  ODDS_COLORS[category]))
+        description = ("有資料的賽事可直接查看；其餘聯賽仍保留，但不會顯示假賠率。"
+                       if is_tw else "先選擇球類，再查看聯賽與賽事")
         title = provider + "｜球類分類"
         actions.append(button("↩ 返回賠率來源", "檢視賠率", "#334155"))
     else:
         if sport not in groups:
-            return odds_league_menu(provider)
+            return odds_league_menu(provider, available=counts)
         title = provider + "｜" + sport
-        description = "選擇聯賽後才載入該聯賽賽事"
+        description = ("帶有「已更新」標記的聯賽才有可核實的官網快照。"
+                       if is_tw else "選擇聯賽後才載入實際可查賠率")
         actions = []
         for league in groups[sport]:
-            label = ("📅 當日全部足球賽事" if league == "足球"
-                     else "📈 " + league)
-            actions.append(button(label, "賠率" + prefix + league,
-                                  ODDS_COLORS[sport]))
+            if is_tw:
+                count = counts.get(league, 0)
+                label = (f"✅ {league}｜已更新 {count} 場" if count
+                         else f"◻ {league}｜尚無快照")
+                color = ODDS_COLORS[sport] if count else "#334155"
+            else:
+                label = "📈 " + league
+                color = ODDS_COLORS[sport]
+            actions.append(button(label, "賠率" + prefix + league, color))
+        if is_tw:
+            total = sum(counts.values())
+            if total:
+                actions.append(button(f"✅ 查看今日可查的 {total} 場",
+                                      "台彩已更新", "#0F766E"))
         actions.append(button("↩ 返回球類分類", provider, "#334155"))
         actions.append(button("🏠 回主選單", MENU, "#334155"))
-    return {"type": "flex", "altText": title,
-            "quickReply": quick_menu(),
+    return {"type": "flex", "altText": title, "quickReply": quick_menu(),
             "contents": {"type": "bubble", "size": "kilo",
                 "header": {"type": "box", "layout": "vertical",
                            "backgroundColor": "#0F172A", "paddingAll": "16px",
                            "contents": [text("📊 " + title, "lg", "#FFFFFF", "bold"),
                                         text(description, "sm", "#CBD5E1")]},
-                "body": {"type": "box", "layout": "vertical", "spacing": "sm",
-                         "paddingAll": "14px", "contents": actions}}}
+                "body": {"type": "box", "layout": "vertical",
+                         "spacing": "sm", "paddingAll": "14px",
+                         "contents": actions}}}
 
 def odds_source_card(provider: str) -> dict:
     official = provider == "台灣運彩賠率"
