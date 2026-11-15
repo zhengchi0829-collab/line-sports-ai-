@@ -1027,42 +1027,69 @@ def odds_category_menu() -> dict:
                                       button("🏠 回主選單", MENU, "#334155")]}}}
 
 
-def odds_league_menu(provider: str) -> dict:
-    """Always display actionable leagues even when the API token is missing.
+ODDS_GROUPS = {
+    "台灣運彩": {
+        "足球": ("足球", "英超", "西甲", "德甲", "義甲", "法甲", "歐冠"),
+        "籃球": ("NBA",),
+        "棒球": ("MLB", "NPB", "KBO", "CPBL"),
+    },
+    "娛樂平台": {
+        "足球": ("英超", "西甲", "德甲", "義甲", "法甲", "歐冠"),
+        "籃球": ("NBA",),
+        "棒球": ("MLB",),
+    },
+}
+ODDS_EMOJIS = {"足球": "⚽", "籃球": "🏀", "棒球": "⚾"}
+ODDS_COLORS = {"足球": "#0F766E", "籃球": "#C2410C", "棒球": "#7C3AED"}
+ODDS_PAGE_SIZE = 4
 
-    The next step reports the actual data availability instead of silently
-    stopping at a credential warning. Both sources remain odds-menu only.
+
+def odds_sport_for_league(league: str) -> str:
+    if league in ("足球", "英超", "西甲", "德甲", "義甲", "法甲", "歐冠"):
+        return "足球"
+    if league in ("NBA", "NCAA", "NBL", "TPBL"):
+        return "籃球"
+    return "棒球"
+
+
+def odds_league_menu(provider: str, sport: str | None = None) -> dict:
+    """Two-step sportsbook navigation: source -> sport -> league.
+
+    A league's fixtures are never fetched merely by opening a sport category.
     """
     prefix = "台灣運彩" if provider == "台灣運彩賠率" else "娛樂平台"
-    configured = (True if prefix == "台灣運彩"
-                  else bool((os.getenv("ODDS_API_KEY") or os.getenv("THE_ODDS_API_KEY") or "").strip()))
-    if prefix == "台灣運彩":
-        leagues = ("足球", "NBA", "MLB", "英超", "西甲", "德甲", "義甲", "法甲",
-                   "歐冠", "NPB", "KBO", "CPBL")
+    groups = ODDS_GROUPS[prefix]
+    if sport is None:
+        actions = [
+            button(ODDS_EMOJIS[category] + " " + category + "賽事",
+                   "賠率分類" + prefix + category, ODDS_COLORS[category])
+            for category in ("足球", "籃球", "棒球")
+        ]
+        description = "先選擇球類，再進入聯賽或賽事，不會一次顯示全部"
+        title = provider + "｜球類分類"
+        actions.append(button("↩ 返回賠率來源", "檢視賠率", "#334155"))
     else:
-        leagues = ("NBA", "MLB", "英超", "西甲", "德甲", "義甲", "法甲", "歐冠")
-    return {"type": "flex", "altText": provider + "｜選擇聯盟",
+        if sport not in groups:
+            return odds_league_menu(provider)
+        title = provider + "｜" + sport
+        description = "選擇聯賽後才載入該聯賽賽事"
+        actions = []
+        for league in groups[sport]:
+            label = ("📅 當日全部足球賽事" if league == "足球"
+                     else "📈 " + league)
+            actions.append(button(label, "賠率" + prefix + league,
+                                  ODDS_COLORS[sport]))
+        actions.append(button("↩ 返回球類分類", provider, "#334155"))
+        actions.append(button("🏠 回主選單", MENU, "#334155"))
+    return {"type": "flex", "altText": title,
             "quickReply": quick_menu(),
             "contents": {"type": "bubble", "size": "kilo",
                 "header": {"type": "box", "layout": "vertical",
                            "backgroundColor": "#0F172A", "paddingAll": "16px",
-                           "spacing": "sm", "contents": [
-                               text("📊 " + provider, "lg", "#FFFFFF", "bold"),
-                               text("請選擇要查詢的聯盟", "sm", "#CBD5E1")]},
-                "body": {"type": "box", "layout": "vertical",
-                         "spacing": "sm", "paddingAll": "14px",
-                         "contents": [
-                             *(button("📈 " + league, "賠率" + prefix + league,
-                                      "#C2410C" if league in ("NBA", "NCAA", "NBL", "TPBL") else
-                                      "#7C3AED" if league in ("MLB", "NPB", "KBO", "CPBL", "MiLB") else
-                                      "#0F766E") for league in leagues),
-                             text("優先顯示已核實的官網每日快照；來源不可用時不顯示模擬賠率。" if prefix == "台灣運彩" else
-                                  ("尚未設定授權 API；點選聯盟可查看原因。" if not configured else
-                                   "僅顯示有來源、可核實的賠率資料。"),
-                                  "xs", "#CBD5E1"),
-                             button("↩ 返回賠率分類", "檢視賠率", "#334155"),
-                         ]}}}
-
+                           "contents": [text("📊 " + title, "lg", "#FFFFFF", "bold"),
+                                        text(description, "sm", "#CBD5E1")]},
+                "body": {"type": "box", "layout": "vertical", "spacing": "sm",
+                         "paddingAll": "14px", "contents": actions}}}
 
 def odds_source_card(provider: str) -> dict:
     official = provider == "台灣運彩賠率"
