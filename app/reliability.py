@@ -1009,6 +1009,13 @@ def odds_single_match_card(provider: str, league: str, item: dict,
                                         button("🏠 回主選單", MENU, "#334155")]}}}
 
 
+def jbot_trial_access(user_id: str | None) -> bool:
+    """Free JBot evaluation is for the authorized tester, never the public bot."""
+    allowed = {entry.strip() for entry in re.split(
+        r"[,;\\s]+", os.getenv("JBOT_TRIAL_USER_IDS", "")) if entry.strip()}
+    return bool(user_id and user_id in allowed)
+
+
 def odds_category_menu() -> dict:
     return {"type": "flex", "altText": "賠率分析｜選擇來源",
             "quickReply": quick_menu(),
@@ -1052,7 +1059,7 @@ def odds_league_menu(provider: str) -> dict:
                                       "#C2410C" if league in ("NBA", "NCAA", "NBL", "TPBL") else
                                       "#7C3AED" if league in ("MLB", "NPB", "KBO", "CPBL", "MiLB") else
                                       "#0F766E") for league in leagues),
-                             text("僅顯示台灣運彩實際賠率紀錄；非官方即時同步，資料以官網為準。" if prefix == "台灣運彩" else
+                             text("JBot 免費試用僅限指定帳號手動測試，最多 2 次/日；不自動更新。" if prefix == "台灣運彩" else
                                   ("尚未設定授權 API；點選聯盟可查看原因。" if not configured else
                                    "僅顯示有來源、可核實的賠率資料。"),
                                   "xs", "#CBD5E1"),
@@ -1847,12 +1854,17 @@ class Controller:
         self.details[key] = (time.monotonic(), result)
         return result
 
-    async def reply(self, raw: str) -> list[dict]:
+    async def reply(self, raw: str, user_id: str | None = None) -> list[dict]:
         raw = str(raw).strip()[:300]
         demo = raw.startswith("\u6a21\u64ec\u5206\u6790")
         if demo:
             raw = raw[2:]
         compact = re.sub(r"\s+", "", raw)
+        if compact in ("我的LINEID", "我的LINE用戶ID"):
+            return [{"type": "text",
+                     "text": ("你的 LINE userId：\\n" + user_id) if user_id
+                             else "請在 LINE 聊天室內發送這個指令。",
+                     "quickReply": quick_menu()}]
         if compact == "足球":
             return [soccer_menu()]
         if compact == "籃球":
@@ -1906,6 +1918,10 @@ class Controller:
         if selected_odds:
             source, league_name, slot = selected_odds.groups()
             provider = "tw" if source == "台灣運彩" else "platform"
+            if provider == "tw" and not jbot_trial_access(user_id):
+                return [empty_state_card("JBot 試用權限",
+                                         "目前僅供指定的 LINE 帳號測試，請先設定允許測試的帳號。",
+                                         category="賠率", error=True, back="台灣運彩賠率")]
             # No API call for platform detail clicks: read only the daily snapshot.
             if provider == "platform":
                 daily = self.odds.daily
@@ -1925,10 +1941,20 @@ class Controller:
         if match_odds:
             source, league_name = match_odds.groups()
             provider = "tw" if source == "台灣運彩" else "platform"
-            configured = ((bool(os.getenv("JBOT_API_TOKEN", "").strip()) or league_name in ("NBA", "MLB")) if provider == "tw"
-                          else bool((os.getenv("ODDS_API_KEY") or os.getenv("THE_ODDS_API_KEY") or "").strip()))
-            if not configured:
-                return [odds_source_card("台灣運彩賠率" if provider=="tw" else "娛樂平台賠率")]
+            if provider == "tw":
+                if not os.getenv("JBOT_API_TOKEN", "").strip():
+                    return [empty_state_card("JBot 免費測試",
+                                             "尚未設定試用金鑰 JBOT_API_TOKEN；未發送任何 API 請求。",
+                                             category="賠率", error=True, back="台灣運彩賠率")]
+                if not jbot_trial_access(user_id):
+                    return [empty_state_card("JBot 免費測試",
+                                             "為避免其他人消耗共用試用額度，目前只開放指定 LINE 帳號測試。請發送「我的LINEID」確認身分，並設定 JBOT_TRIAL_USER_IDS。",
+                                             category="賠率", error=True, back="台灣運彩賠率")]
+            else:
+                configured = bool((os.getenv("ODDS_API_KEY") or
+                                   os.getenv("THE_ODDS_API_KEY") or "").strip())
+                if not configured:
+                    return [odds_source_card("娛樂平台賠率")]
             now = datetime.now(TZ)
             data = await self.odds.feed(provider, league_name, now.strftime("%Y-%m-%d"))
             if not data:
@@ -1951,9 +1977,23 @@ class Controller:
                                              category="賠率",
                                              error=status not in ("not_offered", "no_events"),
                                              back="娛樂平台賠率")]
-                return [empty_state_card(f"{source}｜{league_name}",
-                                         "目前無法取得可核實的台灣運彩實際盤口。資料來源可能未提供該聯盟，或暫時無法連線；不會使用 AI 推估值代替。",
-                                         category="賠率", error=True, back="台灣運彩賠率")]
+                status = self.odds.trial_status(league_name)
+                notes = {
+                    "local_limit": "JBot 免費試用：機器人今天已達自行設定的 2 次查詢上限，避免消耗其他人的共用額度。",
+                    "cooldown": "距離上次 JBot 查詢不足 6 秒，請稍後再選擇聯盟。",
+                    "unauthorized": "JBot 試用金鑰無效或沒有權限，請確認 Render 的 JBOT_API_TOKEN。",
+                    "quota": "JBot 免費試用額度已用完，今天不會自動重試。",
+                    "quota_or_error": "JBot 回傳非成功狀態，今天不會重複查詢相同球類。",
+                    "no_events": "JBot 今日沒有可用的台灣運彩賠率紀錄。",
+                    "api_error": "JBot 暫時無法連線，今天不會自動重試相同球類。",
+                    "cache_unavailable": "無法建立試用快取，為保護免費額度已取消查詢。",
+                    "attempted": "今天已嘗試查詢此球類，不再重複扣用免費額度。",
+                }
+                return [empty_state_card(f"JBot 試用｜{league_name}",
+                                         notes.get(status, "目前沒有可核實的台灣運彩賠率紀錄；不會產生模擬價格。"),
+                                         category="賠率",
+                                         error=status not in ("no_events",),
+                                         back="台灣運彩賠率")]
             return [odds_fixture_picker(provider, league_name, data,
                                         odds_logo_lookup(self.fixtures, league_name))]
         if compact in KEYS:
