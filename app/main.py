@@ -19,6 +19,8 @@ from datetime import datetime, timedelta
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import Response
+from .team_logos import rendered_team_logo
 
 from . import legacy as ui
 from .reliability import (Controller, Game, Snapshot, SPORTS, TZ, VERSION,
@@ -469,6 +471,7 @@ async def lifespan(app):
                                  limits=httpx.Limits(max_connections=12)) as source_client, \
                httpx.AsyncClient(timeout=httpx.Timeout(5, connect=2)) as line_client:
         app.state.controller = Controller(ui, source_client)
+        app.state.team_logo_client = source_client
         # Log boolean readiness only. Never expose trial token or tester user IDs.
         log.info("jbot_trial_setup key_present=%s tester_ids_configured=%s",
                  bool(os.getenv("JBOT_API_TOKEN", "").strip()),
@@ -500,6 +503,20 @@ async def lifespan(app):
 
 
 app = FastAPI(title="LINE Sports AI", version=VERSION, lifespan=lifespan)
+
+
+@app.get("/team-logo")
+async def serve_team_logo(name: str = "隊伍", src: str = "", sport: str = ""):
+    """Return a validated club image or a locally rendered team badge.
+
+    LINE always receives actual image/png on our stable HTTPS URL; the public
+    endpoint never redirects to an unreliable CDN or returns SVG/HTML.
+    """
+    png = await rendered_team_logo(app.state.team_logo_client, name, src, sport)
+    return Response(png, media_type="image/png",
+                    headers={"Cache-Control": "public, max-age=600",
+                             "X-Content-Type-Options": "nosniff"})
+
 
 
 @app.api_route("/", methods=["GET", "HEAD"])
