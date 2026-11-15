@@ -869,7 +869,7 @@ def ai_fair_odds_card(league: str, item: dict, logos: dict[str, str] | None = No
 def odds_fixture_picker(provider: str, league: str, records: list[dict], logos: dict[str, str] | None = None) -> dict:
     """A single LINE carousel card per fixture; details are opened on demand."""
     origin = "娛樂平台" if provider == "platform" else "台灣運彩"
-    heading = f"{league}｜" + ("AI 合理賠率賽事" if provider == "tw" else "選擇賽事")
+    heading = f"{league}｜選擇賽事"
     logos = logos or {}
     bubbles = []
     for index, item in enumerate(records[:30]):
@@ -892,10 +892,10 @@ def odds_fixture_picker(provider: str, league: str, records: list[dict], logos: 
                          odds_team_row(home, odds_team_logo(logos, item.get("home")), "主隊"),
                          text("VS", "xs", "#64748B", "bold"),
                          odds_team_row(away, odds_team_logo(logos, item.get("away")), "客隊"),
-                         text("點選查看 AI 合理賠率" if provider == "tw" else "點選下方按鈕查看這場賠率", "xs", "#64748B")]},
+                         text("點選下方按鈕查看實際賠率紀錄" if provider == "tw" else "點選下方按鈕查看這場賠率", "xs", "#64748B")]},
             "footer": {"type": "box", "layout": "vertical",
                        "paddingAll": "12px", "contents": [
-                           button("🤖 AI 合理賠率" if provider == "tw" else "📈 查看本場賠率", command,
+                           button("📈 查看本場賠率", command,
                                   "#C2410C" if league in ("NBA", "NCAA", "NBL", "TPBL")
                                   else "#7C3AED" if league in ("MLB", "NPB", "KBO", "CPBL", "MiLB")
                                   else "#0F766E"),
@@ -929,7 +929,8 @@ def odds_single_match_card(provider: str, league: str, item: dict,
         prefix = next((emoji for label, emoji in odds_icons if line.startswith(label)), "")
         decorated.append(prefix + line)
     rows = [text(line, "sm", "#334155") for line in decorated]
-    rows.append(text("當日賠率資料｜實際盤口以平台為準",
+    rows.append(text("台灣運彩賠率紀錄｜非官網即時同步；請以官網最新公告為準" if provider == "tw" else
+                     "當日賠率資料｜實際盤口以平台為準",
                      "xs", "#64748B"))
     return {"type": "flex", "altText": (league + "｜" + team_display(item.get("home") or "-") +
             " VS " + team_display(item.get("away") or "-") + " 賠率分析")[:400],
@@ -959,9 +960,9 @@ def odds_category_menu() -> dict:
                 "header": {"type": "box", "layout": "vertical",
                            "backgroundColor": "#0F172A", "paddingAll": "16px",
                            "contents": [text("📊 賠率分析", "lg", "#FFFFFF", "bold"),
-                                        text("台灣運彩選項為 AI 推估；娛樂平台保留實際盤口", "sm", "#CBD5E1")]},
+                                        text("台灣運彩選項僅顯示可核實盤口，絕不使用 AI 推估", "sm", "#CBD5E1")]},
                 "body": {"type": "box", "layout": "vertical", "spacing": "md",
-                         "contents": [button("🇹🇼 AI 合理賠率", "台灣運彩賠率", "#334155"),
+                         "contents": [button("🇹🇼 台灣運彩賠率", "台灣運彩賠率", "#334155"),
                                       button("🎮 娛樂平台賠率", "娛樂平台賠率", "#334155"),
                                       button("🏠 回主選單", MENU, "#334155")]}}}
 
@@ -973,7 +974,7 @@ def odds_league_menu(provider: str) -> dict:
     stopping at a credential warning. Both sources remain odds-menu only.
     """
     prefix = "台灣運彩" if provider == "台灣運彩賠率" else "娛樂平台"
-    configured = (True if prefix == "台灣運彩"
+    configured = ((bool(os.getenv("JBOT_API_TOKEN", "").strip()) or True) if prefix == "台灣運彩"
                   else bool((os.getenv("ODDS_API_KEY") or os.getenv("THE_ODDS_API_KEY") or "").strip()))
     if prefix == "台灣運彩":
         leagues = ("NBA", "MLB", "英超", "西甲", "德甲", "義甲", "法甲",
@@ -986,7 +987,7 @@ def odds_league_menu(provider: str) -> dict:
                 "header": {"type": "box", "layout": "vertical",
                            "backgroundColor": "#0F172A", "paddingAll": "16px",
                            "spacing": "sm", "contents": [
-                               text("📊 " + ("AI 合理賠率" if prefix == "台灣運彩" else provider), "lg", "#FFFFFF", "bold"),
+                               text("📊 " + provider, "lg", "#FFFFFF", "bold"),
                                text("請選擇要查詢的聯盟", "sm", "#CBD5E1")]},
                 "body": {"type": "box", "layout": "vertical",
                          "spacing": "sm", "paddingAll": "14px",
@@ -995,7 +996,7 @@ def odds_league_menu(provider: str) -> dict:
                                       "#C2410C" if league in ("NBA", "NCAA", "NBL", "TPBL") else
                                       "#7C3AED" if league in ("MLB", "NPB", "KBO", "CPBL", "MiLB") else
                                       "#0F766E") for league in leagues),
-                             text("依近五場真實賽果推估合理賠率；非台灣運彩官方盤口。" if prefix == "台灣運彩" else
+                             text("僅顯示台灣運彩實際賠率紀錄；非官方即時同步，資料以官網為準。" if prefix == "台灣運彩" else
                                   ("尚未設定授權 API；點選聯盟可查看原因。" if not configured else
                                    "僅顯示有來源、可核實的賠率資料。"),
                                   "xs", "#CBD5E1"),
@@ -1862,48 +1863,12 @@ class Controller:
             if not isinstance(records, list) or index >= len(records):
                 return [{"type": "text", "text": "本場賠率已失效，請回到賠率選單重新查詢。",
                          "quickReply": quick_menu()}]
-            if provider == "tw":
-                return [ai_fair_odds_card(league_name, records[index],
-                                          odds_logo_lookup(self.fixtures, league_name))]
             return [odds_single_match_card(provider, league_name, records[index],
                                            odds_logo_lookup(self.fixtures, league_name))]
         match_odds = re.fullmatch(r"賠率(台灣運彩|娛樂平台)(英超|西甲|德甲|義甲|法甲|歐冠|NBA|NCAA|NBL|TPBL|MLB|NPB|KBO|CPBL|MiLB)", compact)
         if match_odds:
             source, league_name = match_odds.groups()
             provider = "tw" if source == "台灣運彩" else "platform"
-            if provider == "tw":
-                snapshot = await self.fixtures.get(KEYS[league_name])
-                now = datetime.now(TZ)
-                upcoming = [g for g in snapshot.games if g.state != "final" and g.start >= now]
-                upcoming.sort(key=lambda g: g.start)
-                if not upcoming:
-                    return [empty_state_card(f"{league_name}｜AI 合理賠率",
-                                             "當前無賽事紀錄，暫無可推估的合理賠率。",
-                                             category="賠率", back="台灣運彩賠率")]
-                sport = ("足球" if league_name in SOCCER_LEAGUES else
-                         "籃球" if league_name in ("NBA", "NCAA", "NBL", "TPBL") else "棒球")
-                async def estimate(g):
-                    try:
-                        result = await self.team_details(sport, g.home, g.away,
-                                                         league=league_name, as_of=g.start.date(),
-                                                         fixture=g)
-                        metrics = result[3] if isinstance(result, tuple) and len(result) >= 4 else None
-                        estimated = estimated_fair_odds(g.home, g.away, league_name, metrics)
-                        if estimated:
-                            estimated["start"] = g.start.isoformat()
-                        return estimated
-                    except (httpx.HTTPError, ValueError, TypeError, KeyError, IndexError):
-                        return None
-                results = await asyncio.gather(*(estimate(g) for g in upcoming[:8]))
-                data = [x for x in results if x]
-                if not data:
-                    return [empty_state_card(f"{league_name}｜AI 合理賠率",
-                                             "目前沒有足夠的近五場歷史紀錄，暫無可核實的合理賠率。",
-                                             category="賠率", back="台灣運彩賠率")]
-                day = now.strftime("%Y-%m-%d")
-                self.odds.cache[("tw", league_name, day)] = (time.monotonic(), data)
-                return [odds_fixture_picker("tw", league_name, data,
-                                            odds_logo_lookup(self.fixtures, league_name))]
             configured = ((bool(os.getenv("JBOT_API_TOKEN", "").strip()) or league_name in ("NBA", "MLB")) if provider == "tw"
                           else bool((os.getenv("ODDS_API_KEY") or os.getenv("THE_ODDS_API_KEY") or "").strip()))
             if not configured:
@@ -1931,7 +1896,7 @@ class Controller:
                                              error=status not in ("not_offered", "no_events"),
                                              back="娛樂平台賠率")]
                 return [empty_state_card(f"{source}｜{league_name}",
-                                         "目前沒有取得可核實的賠率資料。",
+                                         "目前無法取得可核實的台灣運彩實際盤口。資料來源可能未提供該聯盟，或暫時無法連線；不會使用 AI 推估值代替。",
                                          category="賠率", error=True, back="台灣運彩賠率")]
             return [odds_fixture_picker(provider, league_name, data,
                                         odds_logo_lookup(self.fixtures, league_name))]
