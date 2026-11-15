@@ -469,6 +469,10 @@ async def lifespan(app):
                                  limits=httpx.Limits(max_connections=12)) as source_client, \
                httpx.AsyncClient(timeout=httpx.Timeout(5, connect=2)) as line_client:
         app.state.controller = Controller(ui, source_client)
+        # Log boolean readiness only. Never expose trial token or tester user IDs.
+        log.info("jbot_trial_setup key_present=%s tester_ids_configured=%s",
+                 bool(os.getenv("JBOT_API_TOKEN", "").strip()),
+                 bool(os.getenv("JBOT_TRIAL_USER_IDS", "").strip()))
         app.state.line_client = line_client
         probe = asyncio.create_task(startup_probe(app))
         refresher = asyncio.create_task(continuous_refresh(app))
