@@ -569,7 +569,8 @@ async def process_event(event, app):
         # Pass only the sender's LINE user ID to authorize private JBot tests.
         # Never log or persist the ID in the odds cache.
         sender = event.get("source") or {}
-        user_id = sender.get("userId") if isinstance(sender, dict) else None
+        user_id = (sender.get("userId") if isinstance(sender, dict)
+                   and sender.get("type") == "user" else None)
         messages = await asyncio.wait_for(
             app.state.controller.reply(raw, user_id=user_id), timeout=18.0)
         messages = holographic_messages(messages)
