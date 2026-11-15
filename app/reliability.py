@@ -914,51 +914,84 @@ def ai_fair_odds_card(league: str, item: dict, logos: dict[str, str] | None = No
                                         button("🏠 回主選單", MENU, "#334155")]}}}
 
 
-def odds_fixture_picker(provider: str, league: str, records: list[dict], logos: dict[str, str] | None = None) -> dict:
-    """A single LINE carousel card per fixture; details are opened on demand."""
-    origin = "娛樂平台" if provider == "platform" else "台灣運彩"
-    heading = f"{league}｜選擇賽事"
-    logos = logos or {}
-    bubbles = []
-    for index, item in enumerate(records[:30]):
-        start = item.get("start") or ""
-        try:
-            when = instant(start).astimezone(TZ).strftime("%m/%d %H:%M")
-        except (ValueError, TypeError):
-            when = str(start)[:16] or "時間未提供"
-        home = team_display(str(item.get("home") or "-"))
-        away = team_display(str(item.get("away") or "-"))
-        command = f"賠率單場{origin}{league}#{index}"
-        bubble = {
-            "type": "bubble", "size": "kilo",
-            "header": {"type": "box", "layout": "vertical",
-                       "backgroundColor": "#0F172A", "paddingAll": "16px",
-                       "contents": [text("📊 " + heading, "lg", "#FFFFFF", "bold"),
-                                    text(when + "｜台灣時間", "sm", "#CBD5E1")]},
-            "body": {"type": "box", "layout": "vertical", "spacing": "md",
-                     "paddingAll": "14px", "contents": [
-                         odds_team_row(home, odds_team_logo(logos, item.get("home")), "主隊"),
-                         text("VS", "xs", "#64748B", "bold"),
-                         odds_team_row(away, odds_team_logo(logos, item.get("away")), "客隊"),
-                         text(("官網每日快照｜盤口會變動，請以官網當下數字為準"
-                               if "官網" in str(item.get("source") or "") else
-                               "第三方台彩賠率紀錄｜非官網即時同步")
-                              if provider == "tw" else "點選下方按鈕查看這場賠率", "xs", "#64748B")]},
-            "footer": {"type": "box", "layout": "vertical",
-                       "paddingAll": "12px", "contents": [
-                           button("📈 查看本場賠率", command,
-                                  "#C2410C" if league in ("NBA", "NCAA", "NBL", "TPBL")
-                                  else "#7C3AED" if league in ("MLB", "NPB", "KBO", "CPBL", "MiLB")
-                                  else "#0F766E"),
-                           button("↩ 返回聯盟選單", origin + "賠率", "#334155")]}}
-        bubbles.append(bubble)
-    if len(bubbles) == 1:
-        contents = bubbles[0]
-    else:
-        contents = {"type": "carousel", "contents": bubbles[:12]}
-    return {"type": "flex", "altText": heading + "｜左右滑動選擇比賽",
-            "quickReply": quick_menu(), "contents": contents}
+def odds_fixture_picker(provider: str, league: str, records: list[dict],
+                        logos: dict[str, str] | None = None, page: int = 0) -> dict:
+    """Compact four-fixture pages with visible logos, not a huge carousel.
 
+    Opening an event is always an explicit action; pagination uses cached
+    records only, so it cannot spend another API request.
+    """
+    origin = "娛樂平台" if provider == "platform" else "台灣運彩"
+    sport = odds_sport_for_league(league)
+    logos = logos or {}
+    records = records[:30]
+    total = len(records)
+    final_page = max(0, (total - 1) // ODDS_PAGE_SIZE)
+    page = min(max(0, int(page)), final_page)
+    start_index = page * ODDS_PAGE_SIZE
+    visible = records[start_index:start_index + ODDS_PAGE_SIZE]
+    entries = []
+    for index, item in enumerate(visible, start_index):
+        stamp = str(item.get("start") or "")
+        try:
+            when = instant(stamp).strftime("%m/%d %H:%M")
+        except (ValueError, TypeError):
+            when = stamp[:16] or "賽事時間待確認"
+        away = team_display(str(item.get("away") or "-"))
+        home = team_display(str(item.get("home") or "-"))
+        command = f"賠率單場{origin}{league}#{index}"
+        entries.append({
+            "type": "box", "layout": "vertical", "spacing": "xs",
+            "paddingAll": "12px", "cornerRadius": "10px",
+            "backgroundColor": "#F1F5F9",
+            "action": {"type": "message", "label": "查看本場賠率", "text": command},
+            "contents": [
+                text("🕒 " + when + "｜點此查看本場賠率", "xs", "#64748B"),
+                {"type": "box", "layout": "horizontal", "spacing": "sm",
+                 "alignItems": "center",
+                 "contents": [
+                     {"type": "image", "url": team_logo_url(away,
+                         odds_team_logo(logos, item.get("away")), sport),
+                      "size": "36px", "flex": 0,
+                      "aspectMode": "fit", "aspectRatio": "1:1"},
+                     {"type": "text", "text": away + " VS " + home,
+                      "size": "sm", "weight": "bold",
+                      "color": "#0F172A", "wrap": True, "flex": 1},
+                     {"type": "image", "url": team_logo_url(home,
+                         odds_team_logo(logos, item.get("home")), sport),
+                      "size": "36px", "flex": 0,
+                      "aspectMode": "fit", "aspectRatio": "1:1"},
+                 ]},
+            ]})
+    if not entries:
+        entries = [text("這個聯賽目前沒有可核實的賽事賠率。", "sm", "#64748B")]
+    footer_buttons = []
+    if page > 0:
+        footer_buttons.append(button(
+            "⬅ 上一頁", f"賠率頁{origin}{league}#{page - 1}", "#0F766E"))
+    if page < final_page:
+        footer_buttons.append(button(
+            "下一頁 ➡", f"賠率頁{origin}{league}#{page + 1}", "#0F766E"))
+    footer_buttons.extend([
+        button("↩ 返回聯賽分類", "賠率分類" + origin + sport, "#334155"),
+        button("🏠 回主選單", MENU, "#334155"),
+    ])
+    return {"type": "flex",
+            "altText": f"{origin}｜{league}｜{total}場賽事（第{page+1}/{final_page+1}頁）",
+            "quickReply": quick_menu(),
+            "contents": {
+                "type": "bubble", "size": "kilo",
+                "header": {"type": "box", "layout": "vertical",
+                           "backgroundColor": "#0F172A",
+                           "paddingAll": "16px", "contents": [
+                               text(ODDS_EMOJIS[sport] + " " + league + "｜賽事列表",
+                                    "lg", "#FFFFFF", "bold"),
+                               text(f"共 {total} 場｜第 {page+1}/{final_page+1} 頁｜每頁最多 4 場",
+                                    "sm", "#CBD5E1")]},
+                "body": {"type": "box", "layout": "vertical", "spacing": "sm",
+                         "paddingAll": "12px", "contents": entries},
+                "footer": {"type": "box", "layout": "vertical", "spacing": "sm",
+                           "paddingAll": "12px", "contents": footer_buttons}}}
 
 def odds_single_match_card(provider: str, league: str, item: dict,
                            logos: dict[str, str] | None = None) -> dict:
