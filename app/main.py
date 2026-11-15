@@ -20,13 +20,14 @@ from datetime import datetime, timedelta
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import Response
-from .team_logos import rendered_team_logo
+from .team_logos import rendered_team_logo, _badge as fallback_team_badge
 
 from . import legacy as ui
 from .reliability import (Controller, Game, Snapshot, SPORTS, TZ, VERSION,
                           fixture_cards, notice, quick_menu, date_category_menu,
                           date_league_menu, odds_category_menu, odds_league_menu, odds_source_card,
-                          select_games, SPECIFIED, holographic_messages)
+                          select_games, SPECIFIED, holographic_messages,
+                          odds_fixture_picker, odds_single_match_card)
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
 log = logging.getLogger("sports_bot")
@@ -82,6 +83,9 @@ async def startup_probe(app):
         no_odds = await app.state.controller.reply("分析NBA 未驗證主隊 vs 未驗證客隊")
         assert not any("獨贏賠率" in str(card) or "真實盤口" in str(card)
                        or "盤口更新：" in str(card) for card in no_odds)
+        png = fallback_team_badge("測試隊", "足球")
+        assert png.startswith(bytes.fromhex("89504e470d0a1a0a")) and 200 < len(png) < 50000
+        log.info("team_logo_local_png_selfcheck=passed bytes=%d", len(png))
         log.info("odds_menu_exclusive_checks=passed version=%s", VERSION)
         log.info("date_filter_checks=passed version=%s", VERSION)
         log.info("startup_ui_checks=passed version=%s", VERSION)
@@ -110,6 +114,22 @@ async def startup_probe(app):
                 if checked.status_code != 200:
                     log.warning("line_new_menus_detail batch=%s %s",
                                 batch_index // 5 + 1, checked.text[:800])
+            # Verify the actual Taiwan screenshot odds cards, including their
+            # stable HTTPS team-image URLs, against LINE's card schema.
+            snapshot_odds = app.state.controller.odds.official_daily_rows(
+                "足球", datetime.now(TZ).strftime("%Y-%m-%d"))
+            if snapshot_odds:
+                example_cards = [
+                    odds_fixture_picker("tw", "足球", snapshot_odds, {}),
+                    odds_single_match_card("tw", "足球", snapshot_odds[0], {}),
+                ]
+                checked = await app.state.line_client.post(
+                    "https://api.line.me/v2/bot/message/validate/reply",
+                    headers=headers, json={"messages": holographic_messages(example_cards)})
+                log.info("line_taiwan_odds_logo_cards status=%s fixtures=%s",
+                         checked.status_code, len(snapshot_odds))
+                if checked.status_code != 200:
+                    log.warning("line_taiwan_odds_logo_cards_detail %s", checked.text[:750])
             # Validate primary navigation in one official LINE schema request.
             theme_cards = [
                 (await app.state.controller.reply("選單"))[0],
