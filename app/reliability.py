@@ -988,8 +988,10 @@ def odds_single_match_card(provider: str, league: str, item: dict,
         prefix = next((emoji for label, emoji in odds_icons if line.startswith(label)), "")
         decorated.append(prefix + line)
     rows = [text(line, "sm", "#334155") for line in decorated]
-    rows.append(text("台灣運彩賠率紀錄｜非官網即時同步；請以官網最新公告為準" if provider == "tw" else
-                     "當日賠率資料｜實際盤口以平台為準",
+    rows.append(text(("官網截圖人工核對｜非即時賠率，請以官網當下盤口為準"
+                      if "截圖" in str(item.get("source") or "") else
+                      "台灣運彩賠率紀錄｜非官網即時同步；請以官網最新公告為準")
+                     if provider == "tw" else "當日賠率資料｜實際盤口以平台為準",
                      "xs", "#64748B"))
     return {"type": "flex", "altText": (league + "｜" + team_display(item.get("home") or "-") +
             " VS " + team_display(item.get("away") or "-") + " 賠率分析")[:400],
@@ -1043,7 +1045,7 @@ def odds_league_menu(provider: str) -> dict:
     configured = (True if prefix == "台灣運彩"
                   else bool((os.getenv("ODDS_API_KEY") or os.getenv("THE_ODDS_API_KEY") or "").strip()))
     if prefix == "台灣運彩":
-        leagues = ("NBA", "MLB", "英超", "西甲", "德甲", "義甲", "法甲",
+        leagues = ("足球", "NBA", "MLB", "英超", "西甲", "德甲", "義甲", "法甲",
                    "歐冠", "NPB", "KBO", "CPBL")
     else:
         leagues = ("NBA", "MLB", "英超", "西甲", "德甲", "義甲", "法甲", "歐冠")
@@ -1916,7 +1918,7 @@ class Controller:
         if compact in ("台灣運彩賠率", "娛樂平台賠率"):
             return [odds_league_menu(compact)]
         selected_odds = re.fullmatch(
-            r"賠率單場(台灣運彩|娛樂平台)(英超|西甲|德甲|義甲|法甲|歐冠|NBA|NCAA|NBL|TPBL|MLB|NPB|KBO|CPBL|MiLB)#([0-9]{1,2})",
+            r"賠率單場(台灣運彩|娛樂平台)(足球|英超|西甲|德甲|義甲|法甲|歐冠|NBA|NCAA|NBL|TPBL|MLB|NPB|KBO|CPBL|MiLB)#([0-9]{1,2})",
             compact)
         if selected_odds:
             source, league_name, slot = selected_odds.groups()
@@ -1944,7 +1946,7 @@ class Controller:
                          "quickReply": quick_menu()}]
             return [odds_single_match_card(provider, league_name, records[index],
                                            odds_logo_lookup(self.fixtures, league_name))]
-        match_odds = re.fullmatch(r"賠率(台灣運彩|娛樂平台)(英超|西甲|德甲|義甲|法甲|歐冠|NBA|NCAA|NBL|TPBL|MLB|NPB|KBO|CPBL|MiLB)", compact)
+        match_odds = re.fullmatch(r"賠率(台灣運彩|娛樂平台)(足球|英超|西甲|德甲|義甲|法甲|歐冠|NBA|NCAA|NBL|TPBL|MLB|NPB|KBO|CPBL|MiLB)", compact)
         if match_odds:
             source, league_name = match_odds.groups()
             provider = "tw" if source == "台灣運彩" else "platform"
