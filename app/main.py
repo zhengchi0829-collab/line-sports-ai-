@@ -562,7 +562,12 @@ async def process_event(event, app):
 
     fallback_text = "系統剛剛忙碌或資料來源暫時無法回應，請再點一次原本的按鈕。"
     try:
-        messages = await asyncio.wait_for(app.state.controller.reply(raw), timeout=18.0)
+        # Pass only the sender's LINE user ID to authorize private JBot tests.
+        # Never log or persist the ID in the odds cache.
+        sender = event.get("source") or {}
+        user_id = sender.get("userId") if isinstance(sender, dict) else None
+        messages = await asyncio.wait_for(
+            app.state.controller.reply(raw, user_id=user_id), timeout=18.0)
         messages = holographic_messages(messages)
         if not isinstance(messages, list) or not messages:
             raise ValueError("empty_messages")
