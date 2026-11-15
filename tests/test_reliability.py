@@ -54,6 +54,14 @@ class UI:
 
 
 class ParserTests(unittest.TestCase):
+    def test_ucl_event_keeps_authoritative_club_ids(self):
+        event = espn_event()
+        event['competitions'][0]['competitors'][0]['team']['id'] = 'H'
+        event['competitions'][0]['competitors'][1]['team']['id'] = 'A'
+        rows = parse_feed('soccer_uefa.champions', {'events': [event]})
+        self.assertEqual(len(rows), 1)
+        self.assertEqual((rows[0].home_team_id, rows[0].away_team_id), ('H', 'A'))
+
     def test_full_nba_schedule_not_today_only(self):
         game = nba_game(when='2026-12-25T22:00:00Z')
         game['gameDateTimeUTC'] = game.pop('gameTimeUTC')
@@ -119,6 +127,67 @@ class ParserTests(unittest.TestCase):
 
 
 class AsyncTests(unittest.IsolatedAsyncioTestCase):
+    async def test_ucl_five_games_backfilled_from_previous_season(self):
+        kickoff = datetime(2026, 11, 25, 4, 0, tzinfo=TZ)
+        fixture = Game('ucl-future', 'soccer', '歐冠', kickoff,
+                       'Home', 'Away', source='ESPN',
+                       home_team_id='H', away_team_id='A')
+        def result(ident, when, home_goals, away_goals):
+            return {'id': ident, 'date': when, 'competitions': [{
+                'status': {'type': {'completed': True}},
+                'competitors': [
+                    {'team': {'id': 'H'}, 'score': {'value': home_goals}},
+                    {'team': {'id': 'A'}, 'score': {'value': away_goals}}]}]}
+        recent = [
+            result('r1', '2026-09-09T20:00:00Z', 2, 0),
+            result('r2', '2026-10-13T20:00:00Z', 0, 1),
+            result('r3', '2026-10-21T20:00:00Z', 1, 1),
+            result('r4', '2026-11-04T20:00:00Z', 3, 0)]
+        older = result('p1', '2025-03-12T20:00:00Z', 1, 0)
+        calls = []
+        def handler(req):
+            calls.append(str(req.url))
+            if req.url.path.endswith('/schedule'):
+                rows = recent + [older, recent[0]] if req.url.params.get('season') == '2025' else recent
+                return httpx.Response(200, json={'events': rows})
+            if req.url.path.endswith('/roster'):
+                return httpx.Response(200, json={'athletes': []})
+            if req.url.path.endswith('/leaders'):
+                return httpx.Response(200, json={'leaders': []})
+            raise AssertionError('UCL must use IDs from the selected ESPN fixture')
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            ctl = Controller(UI, client)
+            history, players, winner, metrics = await ctl.team_details(
+                '足球', 'Home', 'Away', '歐冠', fixture=fixture)
+            self.assertEqual(winner, 'Home')
+            self.assertEqual(metrics['form_games'], 5)
+            self.assertTrue(metrics['ucl_cross_season'])
+            self.assertIn('跨賽季', history)
+            self.assertEqual(len([c for c in calls if 'season=2025' in c]), 2)
+            await ctl.close()
+
+    async def test_ucl_duplicate_seasons_never_invent_a_fifth_game(self):
+        kickoff = datetime(2026, 11, 25, 4, 0, tzinfo=TZ)
+        fixture = Game('ucl-future', 'soccer', '歐冠', kickoff,
+                       'Home', 'Away', source='ESPN',
+                       home_team_id='H', away_team_id='A')
+        same = {'id': 'only-one', 'date': '2026-11-04T20:00:00Z',
+                'competitions': [{'status': {'type': {'completed': True}},
+                    'competitors': [
+                        {'team': {'id': 'H'}, 'score': {'value': 1}},
+                        {'team': {'id': 'A'}, 'score': {'value': 1}}]}]}
+        def handler(req):
+            if req.url.path.endswith('/schedule'):
+                return httpx.Response(200, json={'events': [same]})
+            raise AssertionError('UCL must use fixture team IDs')
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            ctl = Controller(UI, client)
+            history, _, winner, metrics = await ctl.team_details(
+                '足球', 'Home', 'Away', '歐冠', fixture=fixture)
+            self.assertEqual((winner, metrics), (None, None))
+            self.assertIn('1/5場', history)
+            await ctl.close()
+
     async def test_nba_403_does_not_skip_fallback(self):
         calls = []
         def handler(req):

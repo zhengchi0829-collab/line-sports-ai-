@@ -419,7 +419,8 @@ def offline_analysis(sport, matchup=None, team_history=None, star_players=None, 
             if match:
                 who = line.split("｜", 1)[0].split("：", 1)[0].strip()
                 wins, draws, losses = (int(v) for v in match.groups())
-                picks.append(f"{team_zh(who)} {wins}勝{draws}和{losses}敗（{wins * 20}%）")
+                picks.append(f"{team_zh(who)} {wins}勝{draws}和{losses}敗（{wins * 20}%）"
+                             + ("｜跨賽季" if "跨賽季" in str(value) else ""))
         if picks:
             return "\n".join(picks[:2])
         if "勝率" in str(value) and "勝" in str(value):

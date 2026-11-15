@@ -25,7 +25,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.7.5"
+VERSION = "0.7.6"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -73,6 +73,8 @@ class Game:
     time_known: bool = True
     home_score: int | None = None
     away_score: int | None = None
+    home_team_id: str = ""
+    away_team_id: str = ""
 
 
 def final_score(value) -> int | None:
@@ -325,7 +327,8 @@ def parse_feed(kind: str, data: Any, include_final: bool = False) -> list[Game]:
                             if is_final else None,
                             final_score(next((c.get("score") for c in comp["competitors"]
                                               if c.get("homeAway") == "away"), None))
-                            if is_final else None)
+                            if is_final else None,
+                            str(h.get("id") or ""), str(a.get("id") or ""))
             if item.home.strip() and item.away.strip() and item.home != item.away:
                 out.append(item)
         except (KeyError, TypeError, ValueError, IndexError, AttributeError, StopIteration):
@@ -1902,42 +1905,68 @@ class Controller:
                         for n in names if n), default=0.0)
         async def fetch():
             try:
-                response = await self.fixtures.client.get(base + "/teams", params={"limit": "500"})
-                response.raise_for_status()
-                entries = response.json().get("sports", [{}])[0].get("leagues", [{}])[0].get("teams", [])
-                teams = [x.get("team", {}) for x in entries if isinstance(x, dict)]
-                matches = []
-                for name in (a, b):
-                    if not teams:
+                # Prefer IDs from the actual ESPN fixture to avoid UCL club
+                # collisions caused by fuzzy team-name matching.
+                if (league == "歐冠" and fixture is not None
+                        and fixture.home_team_id and fixture.away_team_id):
+                    ids = [fixture.home_team_id, fixture.away_team_id]
+                else:
+                    response = await self.fixtures.client.get(base + "/teams",
+                                                             params={"limit": "500"})
+                    response.raise_for_status()
+                    entries = response.json().get("sports", [{}])[0].get("leagues", [{}])[0].get("teams", [])
+                    teams = [x.get("team", {}) for x in entries if isinstance(x, dict)]
+                    matches = []
+                    for name in (a, b):
+                        if not teams:
+                            return fallback
+                        team = max(teams, key=lambda x: score_team(x, name))
+                        if score_team(team, name) < 0.72 or not team.get("id"):
+                            return fallback
+                        matches.append(team)
+                    if str(matches[0]["id"]) == str(matches[1]["id"]):
                         return fallback
-                    team = max(teams, key=lambda x: score_team(x, name))
-                    if score_team(team, name) < 0.72 or not team.get("id"):
-                        return fallback
-                    matches.append(team)
-                if str(matches[0]["id"]) == str(matches[1]["id"]):
-                    return fallback
-                ids = [str(team["id"]) for team in matches]
-                responses = await asyncio.gather(
-                    *(self.fixtures.client.get(base + "/teams/" + ident + "/schedule") for ident in ids),
-                    return_exceptions=True)
-                records = []
-                scores = []
-                historical_games = []
-                # No look-ahead: exclude every match played on/after the
-                # selected UCL fixture, even if ESPN's current-season schedule
-                # already contains later final results.
+                    ids = [str(team["id"]) for team in matches]
+                # No look-ahead: never include results from this fixture or later.
                 cutoff = (fixture.start if fixture is not None else
                           datetime.combine(as_of, datetime.min.time(), tzinfo=TZ)
                           if as_of is not None else datetime.now(TZ))
-                for ident, response in zip(ids, responses):
+                ucl_start_year = cutoff.year if cutoff.month >= 7 else cutoff.year - 1
+                # Prior to matchday 5 this season's UCL has only four league
+                # phase games. Include the preceding verified UCL season when
+                # available; event-ID dedup prevents double-counting if an
+                # upstream endpoint ignores the season query.
+                seasons = (None, ucl_start_year - 1) if league == "歐冠" else (None,)
+                responses = await asyncio.gather(*(
+                    self.fixtures.client.get(
+                        base + "/teams/" + ident + "/schedule",
+                        params={"season": season} if season is not None else None)
+                    for ident in ids for season in seasons
+                ), return_exceptions=True)
+                records = []
+                scores = []
+                historical_games = []
+                for index, ident in enumerate(ids):
                     played = []
-                    if isinstance(response, httpx.Response) and response.status_code == 200:
-                        for event in response.json().get("events", []):
+                    seen_event_ids = set()
+                    for response in responses[index * len(seasons):(index + 1) * len(seasons)]:
+                        if not isinstance(response, httpx.Response) or response.status_code != 200:
+                            continue
+                        events = response.json().get("events", [])
+                        if not isinstance(events, list):
+                            continue
+                        for event in events:
                             verified = verified_form_match(
                                 event, ident, cutoff, soccer=(sport == "足球"))
-                            if verified is not None:
-                                when, outcome, mine_score, other_score = verified
-                                played.append((when, outcome, mine_score, other_score))
+                            if verified is None:
+                                continue
+                            when, outcome, mine_score, other_score = verified
+                            event_id = str(event.get("id") or
+                                           f"{when.isoformat()}:{mine_score}:{other_score}")
+                            if event_id in seen_event_ids:
+                                continue
+                            seen_event_ids.add(event_id)
+                            played.append((when, outcome, mine_score, other_score))
                     played.sort(key=lambda match: match[0], reverse=True)
                     # Only the last five completed games, newest first.
                     recent_games = played[:5]
@@ -1989,6 +2018,11 @@ class Controller:
                 wins, draws, losses, n = records[chosen_index]
                 history = (f"{chosen}｜歷史最近五場：{wins}勝、{draws}和、{losses}敗"
                            f"｜勝率 {wins / 5 * 100:.1f}%")
+                cross_season = (league == "歐冠" and any(
+                    when < datetime(ucl_start_year, 7, 1, tzinfo=TZ)
+                    for games in historical_games for when, _, _, _ in games))
+                if cross_season:
+                    history += "｜跨賽季"
                 metrics = None
                 if len(scores[0]) == 5 and len(scores[1]) == 5:
                     # Team-specific expected scoring from each team's last five scored
@@ -2032,7 +2066,8 @@ class Controller:
                     metrics = {"total": total_text, "handicap": handicap_text,
                                "expected_total": expected_total, "expected_margin": expected_margin,
                                "form_rates": rates, "form_draw_rates": [rec[1] / 5 for rec in records],
-                               "form_games": 5}
+                               "form_games": 5,
+                               "ucl_cross_season": cross_season}
                 selected_id = ids[0 if chosen == a else 1]
                 roster_response, leaders_response = await asyncio.gather(
                     self.fixtures.client.get(base + "/teams/" + selected_id + "/roster"),
@@ -2084,7 +2119,7 @@ class Controller:
             self.jobs[key] = job
             job.add_done_callback(lambda done: self.jobs.pop(key, None) if self.jobs.get(key) is done else None)
         try:
-            result = await asyncio.wait_for(asyncio.shield(job), 6.0)
+            result = await asyncio.wait_for(asyncio.shield(job), 8.0 if league == "歐冠" else 6.0)
         except TimeoutError:
             return cached[1] if cached else fallback
         if len(self.details) >= 128:
