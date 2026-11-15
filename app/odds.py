@@ -515,7 +515,9 @@ class OddsGateway:
             previous = attempts.get(request_key)
             if isinstance(previous, dict):
                 self.jbot_status[league] = previous.get("status", "unavailable")
-                return self._jbot_league_rows(previous.get("rows") or [], league)
+                matching = self._jbot_league_rows(previous.get("rows") or [], league)
+                self.cache[("tw", league, date)] = (time.monotonic(), matching)
+                return matching
             # Extremely small allowance, irrespective of the public trial's
             # remaining shared credits. No automatic background refresh.
             if len(attempts) >= 2:
@@ -553,7 +555,9 @@ class OddsGateway:
             attempts[request_key] = {"status": status, "rows": rows}
             self._save_jbot_trial(record)
             self.jbot_status[league] = status
-            return self._jbot_league_rows(rows, league)
+            matching = self._jbot_league_rows(rows, league)
+            self.cache[("tw", league, date)] = (time.monotonic(), matching)
+            return matching
 
     async def feed(self, provider, league, date):
         if provider != "tw":
