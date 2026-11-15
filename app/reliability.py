@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from .odds import OddsGateway, format_book
+from .odds import OddsGateway, format_book, odds_market_insights
 from .team_logos import team_logo_url
 import hashlib
 import math
@@ -1013,6 +1013,13 @@ def odds_single_match_card(provider: str, league: str, item: dict,
         prefix = next((emoji for label, emoji in odds_icons if line.startswith(label)), "")
         decorated.append(prefix + line)
     rows = [text(line, "sm", "#334155") for line in decorated]
+    rows.append({"type": "separator", "color": "#CBD5E1", "margin": "md"})
+    rows.append(text("🧠 賠率市場分析", "md", "#0F766E", "bold"))
+    # Never mix up official Taiwan prices with other platform data or make up
+    # an absent point spread / O-U line. This is price-based market context.
+    for insight in odds_market_insights(
+            item, soccer=odds_sport_for_league(league) == "足球"):
+        rows.append(text(insight, "sm", "#334155"))
     rows.append(text(("官網截圖人工核對｜非即時賠率，請以官網當下盤口為準"
                       if "截圖" in str(item.get("source") or "") else
                       "台灣運彩賠率紀錄｜非官網即時同步；請以官網最新公告為準")
