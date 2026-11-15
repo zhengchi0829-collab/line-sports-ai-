@@ -948,7 +948,10 @@ def odds_fixture_picker(provider: str, league: str, records: list[dict], logos: 
                          odds_team_row(home, odds_team_logo(logos, item.get("home")), "主隊"),
                          text("VS", "xs", "#64748B", "bold"),
                          odds_team_row(away, odds_team_logo(logos, item.get("away")), "客隊"),
-                         text("點選下方按鈕查看實際賠率紀錄" if provider == "tw" else "點選下方按鈕查看這場賠率", "xs", "#64748B")]},
+                         text(("官網每日快照｜盤口會變動，請以官網當下數字為準"
+                               if "官網" in str(item.get("source") or "") else
+                               "第三方台彩賠率紀錄｜非官網即時同步")
+                              if provider == "tw" else "點選下方按鈕查看這場賠率", "xs", "#64748B")]},
             "footer": {"type": "box", "layout": "vertical",
                        "paddingAll": "12px", "contents": [
                            button("📈 查看本場賠率", command,
@@ -1059,7 +1062,7 @@ def odds_league_menu(provider: str) -> dict:
                                       "#C2410C" if league in ("NBA", "NCAA", "NBL", "TPBL") else
                                       "#7C3AED" if league in ("MLB", "NPB", "KBO", "CPBL", "MiLB") else
                                       "#0F766E") for league in leagues),
-                             text("JBot 免費試用僅限指定帳號手動測試，最多 2 次/日；不自動更新。" if prefix == "台灣運彩" else
+                             text("優先顯示已核實的官網每日快照；來源不可用時不顯示模擬賠率。" if prefix == "台灣運彩" else
                                   ("尚未設定授權 API；點選聯盟可查看原因。" if not configured else
                                    "僅顯示有來源、可核實的賠率資料。"),
                                   "xs", "#CBD5E1"),
@@ -1918,9 +1921,12 @@ class Controller:
         if selected_odds:
             source, league_name, slot = selected_odds.groups()
             provider = "tw" if source == "台灣運彩" else "platform"
-            if provider == "tw" and not jbot_trial_access(user_id):
-                return [empty_state_card("JBot 試用權限",
-                                         "目前僅供指定的 LINE 帳號測試，請先設定允許測試的帳號。",
+            official_records = (self.odds.official_daily_rows(
+                league_name, datetime.now(TZ).strftime("%Y-%m-%d"))
+                if provider == "tw" else [])
+            if provider == "tw" and not official_records and not jbot_trial_access(user_id):
+                return [empty_state_card("台灣運彩資料狀態",
+                                         "今日尚無已核實的官網賠率快照；JBot 試用僅限指定 LINE 帳號。",
                                          category="賠率", error=True, back="台灣運彩賠率")]
             # No API call for platform detail clicks: read only the daily snapshot.
             if provider == "platform":
@@ -1930,7 +1936,8 @@ class Controller:
                              "quickReply": quick_menu()}]
                 records = self.odds.stored_platform_rows(league_name)
             else:
-                records = self.odds.cache.get(("tw", league_name, datetime.now(TZ).strftime("%Y-%m-%d")), (0, []))[1]
+                records = official_records or self.odds.cache.get(
+                    ("tw", league_name, datetime.now(TZ).strftime("%Y-%m-%d")), (0, []))[1]
             index = int(slot)
             if not isinstance(records, list) or index >= len(records):
                 return [{"type": "text", "text": "本場賠率已失效，請回到賠率選單重新查詢。",
@@ -1942,13 +1949,19 @@ class Controller:
             source, league_name = match_odds.groups()
             provider = "tw" if source == "台灣運彩" else "platform"
             if provider == "tw":
+                today = datetime.now(TZ).strftime("%Y-%m-%d")
+                official = self.odds.official_daily_rows(league_name, today)
+                if official:
+                    return [odds_fixture_picker(
+                        "tw", league_name, official,
+                        odds_logo_lookup(self.fixtures, league_name))]
                 if not os.getenv("JBOT_API_TOKEN", "").strip():
-                    return [empty_state_card("JBot 免費測試",
-                                             "尚未設定試用金鑰 JBOT_API_TOKEN；未發送任何 API 請求。",
+                    return [empty_state_card("台灣運彩｜每日官網快照",
+                                             "今日尚未取得可核實的官網賠率。每日檢查不代表官網允許資料擷取；目前沒有可顯示的真實盤口。",
                                              category="賠率", error=True, back="台灣運彩賠率")]
                 if not jbot_trial_access(user_id):
-                    return [empty_state_card("JBot 免費測試",
-                                             "為避免其他人消耗共用試用額度，目前只開放指定 LINE 帳號測試。請發送「我的LINEID」確認身分，並設定 JBOT_TRIAL_USER_IDS。",
+                    return [empty_state_card("台灣運彩｜資料狀態",
+                                             "今日尚無可核實的官網賠率快照。JBot 免費試用僅限指定 LINE 帳號手動測試。",
                                              category="賠率", error=True, back="台灣運彩賠率")]
             else:
                 configured = bool((os.getenv("ODDS_API_KEY") or
