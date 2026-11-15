@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import os
 from .odds import OddsGateway, format_book
+from .team_logos import team_logo_url
 import hashlib
 import math
 from .baseball_analysis import verified_baseball_analysis
@@ -812,25 +813,16 @@ def odds_logo_lookup(fixtures, league: str) -> dict[str, str]:
 
 
 def odds_team_row(name: str, logo: str, role: str) -> dict:
-    parts = []
-    if isinstance(logo, str) and logo.startswith("https://"):
-        # Direct PNG loads in LINE without a third-party SVG proxy.
-        url = logo if logo.lower().split("?", 1)[0].endswith((".png", ".jpg", ".jpeg", ".webp")) else (
-            "https://wsrv.nl/?url=" + quote(logo, safe="") + "&w=128&h=128&fit=contain&output=png")
-        parts.append({"type": "image", "url": url, "size": "48px", "flex": 0,
-                      "aspectMode": "fit", "aspectRatio": "1:1"})
-    else:
-        parts.append({"type": "box", "layout": "vertical", "width": "48px",
-                      "height": "48px", "cornerRadius": "24px",
-                      "backgroundColor": "#E2E8F0", "justifyContent": "center",
-                      "alignItems": "center", "contents": [
-                          text((name.strip() or "?")[0], "sm", "#334155", "bold")]})
+    # The previous external image URLs frequently broke on LINE. All badge
+    # slots now use our verified 128px PNG endpoint with a local fallback.
+    parts = [{"type": "image", "url": team_logo_url(name, logo),
+              "size": "48px", "flex": 0, "aspectMode": "fit",
+              "aspectRatio": "1:1"}]
     parts.append({"type": "box", "layout": "vertical", "flex": 1,
                   "contents": [text(role, "xxs", "#64748B"),
                                text(name, "sm", "#0F172A", "bold")]})
     return {"type": "box", "layout": "horizontal", "spacing": "sm",
             "alignItems": "center", "contents": parts}
-
 
 def odds_team_logo(logos: dict[str, str], original: str) -> str:
     """Match translated, English and bilingual API team labels."""
@@ -1363,20 +1355,17 @@ def fixture_cards(sport: str, snapshot: Snapshot, team_name, today=False, now=No
         if today and g.start.date() != now.date():
             subtitle = "\u4eca\u65e5\u7121\u5f85\u958b\u8cfd\uff5c\u4e0b\u4e00\u5834"
         def team_row(name, logo, role):
-            content = []
-            if isinstance(logo, str) and logo.startswith("https://"):
-                image = "https://wsrv.nl/?url=" + quote(logo, safe="") + "&w=128&h=128&fit=contain&output=png"
-                content.append({"type": "image", "url": image, "size": "48px", "flex": 0,
-                                "aspectMode": "fit", "aspectRatio": "1:1"})
-            else:
-                # Never leave the logo slot visually blank.
-                content.append({"type": "box", "layout": "vertical", "width": "48px", "height": "48px",
-                                "backgroundColor": "#E2E8F0", "cornerRadius": "24px",
-                                "justifyContent": "center", "alignItems": "center",
-                                "contents": [text((str(name).strip() or "?")[0], "sm", "#334155", "bold")]})
+            # Do not route valid PNGs through an unreliable third-party proxy.
+            # The endpoint serves a real downloaded crest when reachable and
+            # always falls back to a small deterministic local team badge.
+            content = [{"type": "image", "url": team_logo_url(name, logo, sport),
+                        "size": "48px", "flex": 0,
+                        "aspectMode": "fit", "aspectRatio": "1:1"}]
             content.append({"type": "box", "layout": "vertical", "flex": 1,
-                            "contents": [text(role, "xxs", "#64748B"), text(name, "md", weight="bold")]})
-            return {"type": "box", "layout": "horizontal", "spacing": "sm", "alignItems": "center", "contents": content}
+                            "contents": [text(role, "xxs", "#64748B"),
+                                         text(name, "md", weight="bold")]})
+            return {"type": "box", "layout": "horizontal", "spacing": "sm",
+                    "alignItems": "center", "contents": content}
         stamp = snapshot.fetched.strftime("%m/%d %H:%M") if snapshot.fetched else "-"
         bubbles.append({"type": "bubble", "size": "kilo",
             "header": {"type": "box", "layout": "vertical", "backgroundColor": "#0F172A", "paddingAll": "14px",
