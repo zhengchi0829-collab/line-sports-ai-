@@ -49,6 +49,8 @@ KNOWN_BADGES = {
     "薩莫拉 CF": "https://assets.footylogos.com/previews/zamora-cf-logo-footylogos-1200.webp",
     "薩莫拉CF": "https://assets.footylogos.com/previews/zamora-cf-logo-footylogos-1200.webp",
     "科英布拉大學": "https://images.seeklogo.com/logo-png/30/1/academica-coimbra-logo-png_seeklogo-304394.png",
+    "波蒂莫內斯": "https://images.seeklogo.com/logo-png/55/1/portimonense-s-c-logo-png_seeklogo-555856.png",
+    "蒙特內哥羅": "https://images.seeklogo.com/logo-png/5/1/football-association-of-montenegro-logo-png_seeklogo-56490.png",
 }
 SPORTSDB_IDS = {
     "拉賈斯坦聯": "144706",
@@ -226,15 +228,22 @@ async def rendered_team_logo(client: httpx.AsyncClient, name: str,
         known = KNOWN_BADGES.get(name)
         if known and known not in urls:
             urls.append(known)
-        result = None
-        for url in urls:
-            result = await _fetch_image(client, url)
-            if result:
-                break
-        if not result and (sport in ("足球", "soccer") or name in SOCCER_ALIASES):
-            discovered = await _sportsdb_logo(client, name)
-            if discovered:
-                result = await _fetch_image(client, discovered)
+        async def resolve_image():
+            for url in urls:
+                candidate = await _fetch_image(client, url)
+                if candidate:
+                    return candidate
+            if sport in ("足球", "soccer") or name in SOCCER_ALIASES:
+                discovered = await _sportsdb_logo(client, name)
+                if discovered:
+                    return await _fetch_image(client, discovered)
+            return None
+
+        # Never let several slow outside image hosts make LINE time out.
+        try:
+            result = await asyncio.wait_for(resolve_image(), timeout=3.3)
+        except (TimeoutError, asyncio.TimeoutError):
+            result = None
         valid = result is not None
         if not valid:
             result = _badge(name, sport)
