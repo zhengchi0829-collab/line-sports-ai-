@@ -1,6 +1,101 @@
 {
-  "day": null,
-  "captured_at": null,
+  "day": "2026-11-15",
+  "captured_at": "2026-11-15T20:16:11+08:00",
   "source_url": "https://www.sportslottery.com.tw/sportsbook/daily-coupons",
-  "leagues": {}
+  "capture_method": "user_screenshot",
+  "source_note": "User-supplied Taiwan Sports Lottery daily-coupons screenshot of football fixtures (20:16:11 Taiwan time). Human-transcribed 3-way match odds only; other markets were not visible. Not independently verified against live website.",
+  "leagues": {
+    "足球": [
+      {
+        "event_id": "1029",
+        "away": "拉賈斯坦聯",
+        "home": "薩馬萊斯瓦里",
+        "start": "2026-11-15T21:00:00+08:00",
+        "away_price": 1.7,
+        "draw_price": 2.95,
+        "home_price": 3.1,
+        "spread": null,
+        "spread_home_price": null,
+        "spread_away_price": null,
+        "total": null,
+        "over_price": null,
+        "under_price": null
+      },
+      {
+        "event_id": "1023",
+        "away": "休達",
+        "home": "特內里費",
+        "start": "2026-11-15T21:00:00+08:00",
+        "away_price": 3.6,
+        "draw_price": 3.1,
+        "home_price": 1.65,
+        "spread": null,
+        "spread_home_price": null,
+        "spread_away_price": null,
+        "total": null,
+        "over_price": null,
+        "under_price": null
+      },
+      {
+        "event_id": "1159",
+        "away": "艾維利斯",
+        "home": "薩莫拉 CF",
+        "start": "2026-11-15T21:15:00+08:00",
+        "away_price": 3.05,
+        "draw_price": 2.95,
+        "home_price": 1.75,
+        "spread": null,
+        "spread_home_price": null,
+        "spread_away_price": null,
+        "total": null,
+        "over_price": null,
+        "under_price": null
+      },
+      {
+        "event_id": "1162",
+        "away": "亞美尼亞",
+        "home": "拉脫維亞",
+        "start": "2026-11-15T22:00:00+08:00",
+        "away_price": 2,
+        "draw_price": 2.7,
+        "home_price": 2.75,
+        "spread": null,
+        "spread_home_price": null,
+        "spread_away_price": null,
+        "total": null,
+        "over_price": null,
+        "under_price": null
+      },
+      {
+        "event_id": "1163",
+        "away": "蒙特內哥羅",
+        "home": "賽普勒斯",
+        "start": "2026-11-15T22:00:00+08:00",
+        "away_price": 2,
+        "draw_price": 2.95,
+        "home_price": 2.55,
+        "spread": null,
+        "spread_home_price": null,
+        "spread_away_price": null,
+        "total": null,
+        "over_price": null,
+        "under_price": null
+      },
+      {
+        "event_id": "1161",
+        "away": "科英布拉大學",
+        "home": "波蒂莫內斯",
+        "start": "2026-11-15T22:00:00+08:00",
+        "away_price": 2.7,
+        "draw_price": 2.8,
+        "home_price": 2,
+        "spread": null,
+        "spread_home_price": null,
+        "spread_away_price": null,
+        "total": null,
+        "over_price": null,
+        "under_price": null
+      }
+    ]
+  }
 }
