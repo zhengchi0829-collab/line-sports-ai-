@@ -28,7 +28,8 @@ from .reliability import (Controller, Game, Snapshot, SPORTS, TZ, VERSION,
                           date_league_menu, odds_category_menu, odds_league_menu, odds_source_card,
                           select_games, SPECIFIED, holographic_messages,
                           odds_fixture_picker, odds_single_match_card,
-                          odds_today_available, odds_available_menu)
+                          odds_today_available, odds_available_menu,
+                          verified_form_match)
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
 log = logging.getLogger("sports_bot")
@@ -71,6 +72,36 @@ async def startup_probe(app):
                               ui.team_zh, on_date=check_now.date(), now=check_now)
         dated_command = dated["contents"]["contents"][0]["footer"]["contents"][0]["action"]["text"]
         assert check_now.date().isoformat() in dated_command
+        # Champions League regression cases: an aggregate or penalty winner
+        # is NOT necessarily the winner of this particular fixture. Also
+        # never use results that occur after the selected kickoff.
+        fixture_cutoff = datetime(2026, 11, 25, 4, 0, tzinfo=TZ)
+        def ucl_result(when, ours, theirs, *, complete=True):
+            return {"date": when, "competitions": [{
+                "status": {"type": {"completed": complete}},
+                "competitors": [
+                    {"team": {"id": "home"}, "score": {"displayValue": str(ours)},
+                     "winner": True},
+                    {"team": {"id": "away"}, "score": {"value": theirs},
+                     "winner": False},
+                ]}]}
+        drawn = verified_form_match(
+            ucl_result("2026-11-04T20:00:00Z", 1, 1),
+            "home", fixture_cutoff, soccer=True)
+        assert drawn is not None and drawn[1:] == ("D", 1, 1)
+        assert verified_form_match(
+            ucl_result("2026-11-04T20:00:00Z", 0, 2),
+            "home", fixture_cutoff, soccer=True)[1] == "L"
+        assert verified_form_match(
+            ucl_result("2026-11-04T20:00:00Z", 3, 1),
+            "home", fixture_cutoff, soccer=True)[1] == "W"
+        assert verified_form_match(
+            ucl_result("2026-11-25T02:00:00Z", 3, 1),
+            "home", fixture_cutoff, soccer=True) is None
+        assert verified_form_match(
+            ucl_result("2026-11-04T20:00:00Z", 3, 1, complete=False),
+            "home", fixture_cutoff, soccer=True) is None
+        log.info("ucl_form_logic_test=passed date_cutoff=yes draw_vs_winner=yes")
         # Sportsbook prices must appear only in the explicitly selected odds menu.
         odds_ui = odds_category_menu()
         odds_actions = str(odds_ui)
