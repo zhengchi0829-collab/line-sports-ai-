@@ -963,6 +963,31 @@ def odds_fixture_picker(provider: str, league: str, records: list[dict],
                       "aspectMode": "fit", "aspectRatio": "1:1"},
                  ]},
             ]})
+        # Display quoted numbers in the event list, not only after opening
+        # the detail view. Prices are displayed only if actually provided.
+        prices = []
+        for label, key in (("主", "home_price"), ("和", "draw_price"),
+                           ("客", "away_price")):
+            value = item.get(key)
+            if isinstance(value, (int, float)) and 1 < value < 1000:
+                prices.append(f"{label} {value:.2f}")
+        if prices:
+            entries[-1]["contents"].append(
+                text("🏆 獨贏｜" + "／".join(prices), "sm", "#0F766E", "bold"))
+        totals = item.get("total")
+        if isinstance(totals, (int, float)) and totals > 0:
+            if (isinstance(item.get("over_price"), (int, float)) and
+                    isinstance(item.get("under_price"), (int, float))):
+                entries[-1]["contents"].append(
+                    text(f"📈 大小 {totals:g}｜大 {item['over_price']:.2f}／小 {item['under_price']:.2f}",
+                         "xs", "#475569"))
+        handicap = item.get("spread")
+        if isinstance(handicap, (int, float)):
+            if (isinstance(item.get("spread_home_price"), (int, float)) and
+                    isinstance(item.get("spread_away_price"), (int, float))):
+                entries[-1]["contents"].append(
+                    text(f"⚖️ 主讓分 {handicap:+g}｜主 {item['spread_home_price']:.2f}／客 {item['spread_away_price']:.2f}",
+                         "xs", "#475569"))
     if not entries:
         entries = [text("這個聯賽目前沒有可核實的賽事賠率。", "sm", "#64748B")]
     footer_buttons = []
@@ -977,7 +1002,7 @@ def odds_fixture_picker(provider: str, league: str, records: list[dict],
         button("🏠 回主選單", MENU, "#334155"),
     ])
     return {"type": "flex",
-            "altText": f"{origin}｜{league}｜{total}場賽事（第{page+1}/{final_page+1}頁）",
+            "altText": f"{origin}｜{league}｜{total}場有賠率賽事（第{page+1}/{final_page+1}頁）",
             "quickReply": quick_menu(),
             "contents": {
                 "type": "bubble", "size": "kilo",
