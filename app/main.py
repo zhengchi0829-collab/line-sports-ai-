@@ -78,16 +78,33 @@ async def startup_probe(app):
             source = provider.removesuffix("賠率")
             sport_menu = odds_league_menu(provider)
             top = str(sport_menu)
-            for sport, league in (("足球", "英超"), ("籃球", "NBA"), ("棒球", "MLB")):
+            for sport, leagues in (
+                    ("足球", ("英超", "西甲", "德甲", "義甲", "法甲", "歐冠")),
+                    ("籃球", ("NBA", "NCAA", "NBL", "TPBL")),
+                    ("棒球", ("MLB", "NPB", "KBO", "CPBL", "MiLB"))):
                 assert "賠率分類" + source + sport in top
                 league_menu = odds_league_menu(provider, sport)
                 choices = str(league_menu)
-                assert "賠率" + source + league in choices
+                for league in leagues:
+                    assert "賠率" + source + league in choices
                 assert "返回球類分類" in choices
             assert "賠率" + source + "英超" not in top  # hidden until chosen
         no_odds = await app.state.controller.reply("分析NBA 未驗證主隊 vs 未驗證客隊")
         assert not any("獨贏賠率" in str(card) or "真實盤口" in str(card)
                        or "盤口更新：" in str(card) for card in no_odds)
+        # The live screenshot has 1X2 only, so analysis must explain the
+        # observed market and leave spread/total unavailable rather than invent.
+        today_tw = app.state.controller.odds.official_daily_rows(
+            "足球", check_now.strftime("%Y-%m-%d"))
+        if today_tw:
+            selected_card = (await app.state.controller.reply(
+                "賠率單場台灣運彩足球#0"))[0]
+            card_text = str(selected_card)
+            assert "獨贏分析" in card_text
+            assert "盤口結論" in card_text
+            assert "讓分分析：尚無完整實際盤口" in card_text
+            assert "大小分分析：尚無完整實際盤口" in card_text
+            log.info("tw_odds_market_analysis=passed count=%s", len(today_tw))
         png = fallback_team_badge("測試隊", "足球")
         assert png.startswith(bytes.fromhex("89504e470d0a1a0a")) and 200 < len(png) < 50000
         log.info("team_logo_local_png_selfcheck=passed bytes=%d", len(png))
