@@ -727,14 +727,35 @@ def logo_key(name: str) -> str:
     return re.sub(r"[^\w]", "", str(name or "")).casefold()
 
 
+# ESPN's direct PNG assets avoid SVG conversion through third-party proxies.
+# Official league IDs remain the canonical keys for NBA / MLB lookup.
+NBA_ESPN_SLUGS = {
+    "Atlanta Hawks":"atl", "Boston Celtics":"bos", "Brooklyn Nets":"bkn",
+    "Charlotte Hornets":"cha", "Chicago Bulls":"chi", "Cleveland Cavaliers":"cle",
+    "Dallas Mavericks":"dal", "Denver Nuggets":"den", "Detroit Pistons":"det",
+    "Golden State Warriors":"gs", "Houston Rockets":"hou", "Indiana Pacers":"ind",
+    "LA Clippers":"lac", "Los Angeles Clippers":"lac", "Los Angeles Lakers":"lal",
+    "Memphis Grizzlies":"mem", "Miami Heat":"mia", "Milwaukee Bucks":"mil",
+    "Minnesota Timberwolves":"min", "New Orleans Pelicans":"no",
+    "New York Knicks":"ny", "Oklahoma City Thunder":"okc",
+    "Orlando Magic":"orl", "Philadelphia 76ers":"phi", "Phoenix Suns":"phx",
+    "Portland Trail Blazers":"por", "Sacramento Kings":"sac",
+    "San Antonio Spurs":"sa", "Toronto Raptors":"tor",
+    "Utah Jazz":"utah", "Washington Wizards":"wsh",
+}
+
+
 def official_logo(league: str, team: str) -> str:
     source = NBA_LOGO_IDS if league == "NBA" else MLB_LOGO_IDS if league == "MLB" else {}
     wanted = {logo_key(team), logo_key(chinese_name(team))}
     for name, ident in source.items():
         if wanted & {logo_key(name), logo_key(chinese_name(name))}:
-            return (f"https://cdn.nba.com/logos/nba/{ident}/primary/L/logo.svg"
-                    if league == "NBA" else
-                    f"https://www.mlbstatic.com/team-logos/{ident}.svg")
+            if league == "NBA":
+                slug = NBA_ESPN_SLUGS.get(name)
+                if slug:
+                    return f"https://a.espncdn.com/i/teamlogos/nba/500/{slug}.png"
+            if league == "MLB":
+                return f"https://www.mlbstatic.com/team-logos/{ident}.png"
     return ""
 
 
@@ -771,7 +792,9 @@ def odds_logo_lookup(fixtures, league: str) -> dict[str, str]:
 def odds_team_row(name: str, logo: str, role: str) -> dict:
     parts = []
     if isinstance(logo, str) and logo.startswith("https://"):
-        url = "https://wsrv.nl/?url=" + quote(logo, safe="") + "&w=128&h=128&fit=contain&output=png"
+        # Direct PNG loads in LINE without a third-party SVG proxy.
+        url = logo if logo.lower().split("?", 1)[0].endswith((".png", ".jpg", ".jpeg", ".webp")) else (
+            "https://wsrv.nl/?url=" + quote(logo, safe="") + "&w=128&h=128&fit=contain&output=png")
         parts.append({"type": "image", "url": url, "size": "48px", "flex": 0,
                       "aspectMode": "fit", "aspectRatio": "1:1"})
     else:
@@ -788,7 +811,18 @@ def odds_team_row(name: str, logo: str, role: str) -> dict:
 
 
 def odds_team_logo(logos: dict[str, str], original: str) -> str:
-    return logos.get(logo_key(original)) or logos.get(logo_key(chinese_name(original))) or ""
+    """Match translated, English and bilingual API team labels."""
+    raw = str(original or "").replace("（", "(").replace("）", ")").strip()
+    candidates = [raw, chinese_name(raw)]
+    if "(" in raw and ")" in raw:
+        zh, eng = raw.split("(", 1)
+        eng = eng.split(")", 1)[0]
+        candidates.extend((zh.strip(), eng.strip(), chinese_name(eng.strip())))
+    for candidate in candidates:
+        image = logos.get(logo_key(candidate))
+        if image:
+            return image
+    return ""
 
 
 def estimated_fair_odds(home: str, away: str, league: str, metrics: dict | None) -> dict | None:
