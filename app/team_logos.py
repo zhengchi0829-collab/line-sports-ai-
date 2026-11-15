@@ -45,6 +45,10 @@ KNOWN_BADGES = {
     "拉賈斯坦聯": "https://images.mykhel.com/webp/common_dynamic/images/common/desk/football_flags/mk-2103.png?v=1",
     "休達": "https://assets.football-logos.cc/logos/spain/700x700/ceuta.a195364b.png",
     "特內里費": "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a2/CD_Tenerife_logo.png/320px-CD_Tenerife_logo.png",
+    "艾維利斯": "https://images.seeklogo.com/logo-png/11/1/real-aviles-industrial-logo-png_seeklogo-116357.png",
+    "薩莫拉 CF": "https://assets.footylogos.com/previews/zamora-cf-logo-footylogos-1200.webp",
+    "薩莫拉CF": "https://assets.footylogos.com/previews/zamora-cf-logo-footylogos-1200.webp",
+    "科英布拉大學": "https://images.seeklogo.com/logo-png/30/1/academica-coimbra-logo-png_seeklogo-304394.png",
 }
 SPORTSDB_IDS = {
     "拉賈斯坦聯": "144706",
@@ -62,6 +66,7 @@ SAFE_IMAGE_HOSTS = {
     "www.volters.jp", "pleagueofficial.com", "imgs.tsna.com",
     "www.lala-peace.tw", "www.google.com",
     "wsrv.nl", "www.wsrv.nl",
+    "assets.footylogos.com", "images.seeklogo.com", "i.imgur.com",
 }
 # Some known club assets are hosted at publisher-specific CDN origins. An
 # unsupported source never becomes an unchecked third-party image request.
@@ -77,11 +82,11 @@ def _allowed_image_url(url: str) -> bool:
         return False
     try:
         parsed = urlparse(url)
+        return (parsed.scheme == "https" and parsed.hostname in SAFE_IMAGE_HOSTS
+                and parsed.port in (None, 443)
+                and not parsed.username and not parsed.password)
     except ValueError:
         return False
-    return (parsed.scheme == "https" and parsed.hostname in SAFE_IMAGE_HOSTS
-            and parsed.port in (None, 443)
-            and not parsed.username and not parsed.password)
 
 
 def team_logo_url(name: str, source: str = "", sport: str = "") -> str:
