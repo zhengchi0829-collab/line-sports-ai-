@@ -74,6 +74,7 @@ def jbot_normalize(payload):
         book={
             "source":"台灣運彩（JBot 第三方記錄）","book":"台灣運彩","updated":str(quote.get("update") or ""),
             "home":str(event.get("home") or ""), "away":str(event.get("away") or ""),
+            "league":str(event.get("league") or ""),
             "start":str(event.get("time") or ""),
             "home_price":number(normal.get("h")), "away_price":number(normal.get("a")),
             "draw_price":number(normal.get("d")),
@@ -293,6 +294,12 @@ class OddsGateway:
         self.daily_file = Path(os.getenv("ODDS_DAILY_CACHE_PATH", "/tmp/line_sports_odds_daily.json"))
         self.daily = self._read_daily()
         self.public_blob_cache = {}
+        # Free JBot trial is shared across ALL developers. Only manual requests;
+        # durable-on-instance daily cache avoids spending on repeated taps.
+        self.jbot_trial_file = Path(os.getenv("JBOT_TRIAL_CACHE_PATH", "/tmp/line_sports_jbot_trial.json"))
+        self.jbot_trial_lock = asyncio.Lock()
+        self.jbot_trial = self._read_jbot_trial()
+        self.jbot_status = {}
 
     def _read_daily(self):
         try:
@@ -449,44 +456,115 @@ class OddsGateway:
         self.public_blob_cache[key] = output
         return output
 
-    async def feed(self, provider, league, date):
-        if provider != "tw":
-            return await self._daily_platform_feed(league)
-        cache_key = (provider, league, date)
-        cache = self.cache.get(cache_key)
-        if cache and time.monotonic() - cache[0] < 300:
-            return cache[1]
-        lock = self.locks.setdefault(cache_key, asyncio.Lock())
-        async with lock:
-            cache = self.cache.get(cache_key)
-            if cache and time.monotonic() - cache[0] < 300:
-                return cache[1]
-            data = []
-            key = os.getenv("JBOT_API_TOKEN", "").strip()
-            kind = JSPORTS.get(league)
-            if not kind:
+    def _read_jbot_trial(self):
+        try:
+            data = json.loads(self.jbot_trial_file.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except (OSError, ValueError, TypeError):
+            return {}
+
+    def _save_jbot_trial(self, data):
+        # Save a pending attempt before calling the API, never on failure retry.
+        try:
+            self.jbot_trial_file.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.jbot_trial_file.with_suffix(".tmp")
+            tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+            tmp.replace(self.jbot_trial_file)
+            self.jbot_trial = data
+            return True
+        except OSError:
+            return False
+
+    @staticmethod
+    def _jbot_league_rows(rows, league):
+        # JBot FTB and BSK return all football/other basketball competitions.
+        # Only label a quote as belonging to a league if its API league matches.
+        names = {
+            "英超": ("英超", "英格蘭超級", "premier league"),
+            "西甲": ("西甲", "西班牙甲級", "la liga"),
+            "德甲": ("德甲", "德國甲級", "bundesliga"),
+            "義甲": ("義甲", "義大利甲級", "serie a"),
+            "法甲": ("法甲", "法國甲級", "ligue 1"),
+            "歐冠": ("歐冠", "歐洲冠軍", "champions league"),
+            "NCAA": ("ncaa", "美國大學", "大學籃球"),
+            "NBL": ("nbl", "澳洲職籃", "澳洲國家籃球"),
+            "TPBL": ("tpbl", "台灣職籃", "台灣職業籃球"),
+            "MiLB": ("milb", "小聯盟", "minor league"),
+        }
+        aliases = names.get(league)
+        if not aliases:
+            return rows
+        return [row for row in rows
+                if any(alias.casefold() in str(row.get("league") or "").casefold()
+                       for alias in aliases)]
+
+    def trial_status(self, league):
+        return self.jbot_status.get(league, "unavailable")
+
+    async def _jbot_trial_feed(self, league, date, key):
+        sport = JSPORTS.get(league)
+        if not sport:
+            self.jbot_status[league] = "not_supported"
+            return []
+        today = datetime.now(TZ).strftime("%Y-%m-%d")
+        request_key = f"{sport}|{date}"
+        async with self.jbot_trial_lock:
+            record = self.jbot_trial if self.jbot_trial.get("day") == today else {
+                "day": today, "attempts": {}, "last_call_at": 0}
+            attempts = record.get("attempts", {})
+            previous = attempts.get(request_key)
+            if isinstance(previous, dict):
+                self.jbot_status[league] = previous.get("status", "unavailable")
+                return self._jbot_league_rows(previous.get("rows") or [], league)
+            # Extremely small allowance, irrespective of the public trial's
+            # remaining shared credits. No automatic background refresh.
+            if len(attempts) >= 2:
+                self.jbot_status[league] = "local_limit"
                 return []
-            if not key:
-                data = verified_taiwan_rows(await self._public_blob_feed(league, date), date)
-                if data:
-                    self.cache[cache_key] = (time.monotonic(), data)
-                return data
-            if time.monotonic() - self.last_jbot_call < 5.5:
+            now = time.time()
+            if now - float(record.get("last_call_at") or 0) < 6:
+                self.jbot_status[league] = "cooldown"
                 return []
-            self.last_jbot_call = time.monotonic()
+            attempts[request_key] = {"status": "attempted", "rows": []}
+            record["attempts"] = attempts
+            record["last_call_at"] = now
+            if not self._save_jbot_trial(record):
+                self.jbot_status[league] = "cache_unavailable"
+                return []
+            status, rows = "api_error", []
             try:
                 response = await self.client.get(
                     "https://api.sportsbot.tech/v2/odds",
-                    params={"sport": kind, "date": date, "mode": "close"},
-                    headers={"X-JBot-Token": key}, timeout=5,
-                )
-                if response.status_code == 200:
-                    data = verified_taiwan_rows(jbot_normalize(response.json()), date)
+                    params={"sport": sport, "date": date, "mode": "close"},
+                    headers={"X-JBot-Token": key}, timeout=7)
+                if response.status_code in (401, 403):
+                    status = "unauthorized"
+                elif response.status_code == 429:
+                    status = "quota"
+                elif response.status_code == 200:
+                    payload = response.json()
+                    if isinstance(payload, dict) and payload.get("status") == "OK":
+                        rows = verified_taiwan_rows(jbot_normalize(payload), date)
+                        status = "ok" if rows else "no_events"
+                    else:
+                        status = "quota_or_error"
             except (httpx.HTTPError, ValueError, TypeError, KeyError):
-                data = []
-            if data:
-                self.cache[cache_key] = (time.monotonic(), data)
-            return data
+                status = "api_error"
+            attempts[request_key] = {"status": status, "rows": rows}
+            self._save_jbot_trial(record)
+            self.jbot_status[league] = status
+            return self._jbot_league_rows(rows, league)
+
+    async def feed(self, provider, league, date):
+        if provider != "tw":
+            return await self._daily_platform_feed(league)
+        key = os.getenv("JBOT_API_TOKEN", "").strip()
+        if not key:
+            self.jbot_status[league] = "missing_key"
+            return []
+        # Never schedule free trial requests. Each button tap reads the same
+        # persistent per-sport/day record after the first manual attempt.
+        return await self._jbot_trial_feed(league, date, key)
 
     async def match(self, provider, league, home, away, kickoff, translate=None):
         if not kickoff:return None
