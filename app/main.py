@@ -320,19 +320,41 @@ async def verify_line_webhook(app):
                 app.state.webhook_check = {"status": "repair_failed", "http": update.status_code,
                                            "active": active}
                 return
-        test = await app.state.line_client.post(
-            "https://api.line.me/v2/bot/channel/webhook/test",
-            headers=headers, json={"endpoint": expected})
-        test_ok = test.status_code == 200 and bool(
-            test.json().get("success", False))
+        test_ok = False
+        test_http = 0
+        test_reason = "unknown"
+        # The free Render instance can be cold during its first LINE probe.
+        # A single failed probe must not be mistaken for an inactive channel.
+        # Retry only the standard API test, never any customer message.
+        for attempt in range(2):
+            try:
+                test = await app.state.line_client.post(
+                    "https://api.line.me/v2/bot/channel/webhook/test",
+                    headers=headers, json={"endpoint": expected})
+                test_http = test.status_code
+                payload = test.json() if test.content else {}
+                test_ok = test_http == 200 and payload.get("success") is True
+                test_reason = str(payload.get("reason") or payload.get("message")
+                                  or payload.get("error") or "unknown")[:140]
+                if test_ok:
+                    break
+                log.warning("line_webhook_test_attempt attempt=%s http=%s reason=%s",
+                            attempt + 1, test_http, test_reason)
+            except (httpx.HTTPError, ValueError, TypeError) as exc:
+                test_reason = type(exc).__name__
+                log.warning("line_webhook_test_attempt attempt=%s failure=%s",
+                            attempt + 1, test_reason)
+            if attempt == 0:
+                await asyncio.sleep(8)
         app.state.webhook_check = {
             "status": "ready" if active and test_ok else
                       "inactive" if not active else "test_failed",
             "active": active, "endpoint_matches": True,
             "fixed_endpoint": changed, "test_success": test_ok,
+            "test_http": test_http, "test_reason": test_reason if not test_ok else None,
         }
-        log.warning("line_webhook_check active=%s endpoint_matches=%s updated=%s test=%s",
-                    active, True, changed, test_ok)
+        log.warning("line_webhook_check active=%s endpoint_matches=%s updated=%s test=%s http=%s",
+                    active, True, changed, test_ok, test_http)
     except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
         app.state.webhook_check = {"status": "exception", "error": type(exc).__name__}
         log.warning("line_webhook_check exception=%s", type(exc).__name__)
@@ -514,6 +536,30 @@ async def continuous_refresh(app):
                             if response.status_code != 200:
                                 log.warning("soccer_analysis_payload_error league=%s details=%s",
                                             label, response.text[:800])
+                            if label == "歐冠":
+                                # Test the EXACT button text produced by LINE's
+                                # fixture card, including fixture date/teams.
+                                one_game = fixture_cards(
+                                    key, Snapshot([game], snapshot.fetched,
+                                                  snapshot.errors, snapshot.successes),
+                                    ui.team_zh)
+                                cmd = one_game["contents"]["contents"][0][
+                                    "footer"]["contents"][0]["action"]["text"]
+                                assert cmd.startswith("分析歐冠 ") and game.start.strftime(
+                                    "%Y-%m-%d") in cmd
+                                direct = await asyncio.wait_for(
+                                    app.state.controller.reply(cmd), timeout=13)
+                                if not direct or direct[0].get("type") != "flex":
+                                    raise AssertionError("UCL button returned no analysis card")
+                                checked = await app.state.line_client.post(
+                                    "https://api.line.me/v2/bot/message/validate/reply",
+                                    headers=headers, json={
+                                        "messages": holographic_messages(direct)})
+                                log.info("ucl_exact_button_validation status=%s date=%s",
+                                         checked.status_code, game.start.date())
+                                if checked.status_code != 200:
+                                    log.warning("ucl_exact_button_error status=%s reason=%s",
+                                                checked.status_code, checked.text[:450])
                         except Exception as exc:
                             log.exception("soccer_analysis_validation league=%s error=%s",
                                       label, type(exc).__name__)
