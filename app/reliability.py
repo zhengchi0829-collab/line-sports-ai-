@@ -525,6 +525,26 @@ class Fixtures:
         cached = self.date_cache.get(key)
         if cached and time.monotonic() - cached[0] < 240:
             return cached[1]
+        # The UCL listing has already fetched this game's verified ESPN data.
+        # Reusing the fresh selected-date fixtures makes its "立即分析" button
+        # immediate instead of blocking on 2 more scoreboard HTTP requests.
+        # Avoid stale completed/live results: only reuse future kickoffs.
+        if sport == "soccer_ucl":
+            previous = self.last.get(sport)
+            record = self.cache.get(sport)
+            now = datetime.now(TZ)
+            if (previous and record and previous.successes > 0 and
+                    time.monotonic() - record[0] < 900):
+                available = [game for game in previous.games
+                             if game.start.date() == selected
+                             and game.start > now and game.state == "scheduled"]
+                if available:
+                    snap = Snapshot(available, previous.fetched, previous.errors,
+                                    previous.successes, previous.stale)
+                    self.date_cache[key] = (time.monotonic(), snap)
+                    log.info("ucl_analysis_fixture_cache_hit date=%s games=%s",
+                             selected, len(available))
+                    return snap
         specs = self.specs_for_date(sport, selected)
         if not specs:
             return Snapshot(errors=["no_source_for_date"])
