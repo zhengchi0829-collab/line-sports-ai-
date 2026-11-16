@@ -37,15 +37,31 @@ def check(base):
     last = refresh.get("last_run_epoch")
     if isinstance(last, (float, int)) and time.time() - last > 1200:
         raise ValueError("Background fixture refresh has been stale for over 20 minutes")
+    started = features.get("bot_started_epoch")
+    if last is None and isinstance(started, (float, int)) and time.time() - started > 240:
+        raise ValueError("Background fixture refresh never started")
     counts = refresh.get("counts") or {}
     if any(isinstance(value, int) and value < 0 for value in counts.values()):
         raise ValueError("One or more fixture providers failed to refresh")
+    successes = refresh.get("source_successes") or {}
+    missing = [name for name in ("soccer_ucl", "soccer_epl", "basketball")
+               if name in successes and successes[name] == 0]
+    if missing:
+        raise ValueError("Core fixture sources failed: " + ", ".join(missing))
+    errors = refresh.get("source_errors") or {}
+    failed_requests = sum(len(rows) for rows in errors.values() if isinstance(rows, list))
+    if failed_requests >= 8:
+        raise ValueError("Many fixture sources failed in the latest refresh: " +
+                         str(failed_requests))
     webhook = features.get("line_webhook") or {}
     if webhook.get("status") in {
         "inactive", "missing_token", "repair_failed", "api_error",
         "test_failed", "exception",
     }:
         raise ValueError("LINE webhook check failed: " + str(webhook.get("status")))
+    if (webhook.get("status") == "checking"
+            and isinstance(started, (float, int)) and time.time() - started > 240):
+        raise ValueError("LINE webhook validation has not completed")
     richmenu = features.get("richmenu") or {}
     if richmenu.get("action_count") == 0:
         raise ValueError("LINE rich menu has no actions")

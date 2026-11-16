@@ -450,6 +450,7 @@ async def continuous_refresh(app):
     """Keep fixture caches warm while the service is running."""
     # Give startup validation a short head start, then continuously refresh every 5 minutes.
     await asyncio.sleep(10)
+    last_webhook_check = time.monotonic()
     while True:
         started = time.monotonic()
         try:
@@ -458,16 +459,27 @@ async def continuous_refresh(app):
                 return_exceptions=True,
             )
             counts = {}
+            source_successes = {}
+            source_errors = {}
             failures = 0
             for key, result in zip(REFRESH_KEYS, results):
                 if isinstance(result, Snapshot):
                     counts[key] = len(result.games)
+                    source_successes[key] = result.successes
+                    source_errors[key] = result.errors[:8]
                     failures += len(result.errors)
                 else:
                     counts[key] = -1
+                    source_successes[key] = 0
+                    source_errors[key] = [type(result).__name__]
                     failures += 1
             app.state.last_background_refresh = time.time()
             app.state.background_refresh_counts = counts
+            app.state.background_refresh_successes = source_successes
+            app.state.background_refresh_errors = source_errors
+            if time.monotonic() - last_webhook_check >= 600:
+                last_webhook_check = time.monotonic()
+                await verify_line_webhook(app)
             if not getattr(app.state, "team_translation_checked", False):
                 app.state.team_translation_checked = True
                 for key in REFRESH_KEYS:
@@ -615,12 +627,17 @@ async def lifespan(app):
     app.state.line_validation = None
     app.state.last_background_refresh = None
     app.state.background_refresh_counts = {}
+    app.state.background_refresh_successes = {}
+    app.state.background_refresh_errors = {}
+    app.state.bot_started_epoch = time.time()
     app.state.soccer_validation_done = False
     app.state.date_probe_status = {}
     app.state.webhook_check = {"status": "checking"}
     app.state.richmenu_check = {"status": "checking"}
-    async with httpx.AsyncClient(timeout=httpx.Timeout(3.5, connect=2), follow_redirects=True,
-                                 limits=httpx.Limits(max_connections=12)) as source_client, \
+    async with httpx.AsyncClient(timeout=httpx.Timeout(6.0, connect=2.5, pool=6),
+                                 follow_redirects=True,
+                                 limits=httpx.Limits(max_connections=48,
+                                                     max_keepalive_connections=24)) as source_client, \
                httpx.AsyncClient(timeout=httpx.Timeout(5, connect=2)) as line_client:
         app.state.controller = Controller(ui, source_client)
         app.state.team_logo_client = source_client
@@ -681,7 +698,8 @@ async def health():
 @app.get("/health/features")
 async def feature_health():
     ctl = app.state.controller
-    return {"version": VERSION, "line_message_validation": app.state.line_validation,
+    return {"version": VERSION, "bot_started_epoch": app.state.bot_started_epoch,
+            "line_message_validation": app.state.line_validation,
             "providers": {sport: {"cached_games": len(item[1].games),
                          "updated": item[1].fetched.isoformat() if item[1].fetched else None}
                           for sport, item in ctl.fixtures.cache.items()},
@@ -690,6 +708,8 @@ async def feature_health():
                 "interval_seconds": 300,
                 "last_run_epoch": app.state.last_background_refresh,
                 "counts": app.state.background_refresh_counts,
+                "source_successes": app.state.background_refresh_successes,
+                "source_errors": app.state.background_refresh_errors,
             },
             "pending_events": len(app.state.pending),
             "dated_analysis_probe": app.state.date_probe_status,
