@@ -116,6 +116,11 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(select_games(games, NOW, today=True), [])
         self.assertEqual(select_games(games, NOW, future=True), games)
 
+    def test_ucl_listing_can_show_nine_same_day_games(self):
+        games = [Game(str(i), 'soccer', '歐冠', NOW + timedelta(days=3),
+                      'H' + str(i), 'A' + str(i)) for i in range(9)]
+        self.assertEqual(len(select_games(games, NOW, future=True)), 9)
+
     def test_past_fixture_not_promoted_to_future(self):
         g = Game('1', 'soccer', 'L', NOW - timedelta(days=1), 'H', 'A')
         self.assertFalse(select_games([g], NOW))
@@ -195,18 +200,19 @@ class AsyncTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn('1/5場', history)
             await ctl.close()
 
-    async def test_nba_403_does_not_skip_fallback(self):
+    async def test_nba_month_failure_does_not_skip_other_months(self):
         calls = []
         def handler(req):
             calls.append(str(req.url))
-            if 'espn' in req.url.host:
-                return httpx.Response(200, json={'events': [espn_event()]})
-            return httpx.Response(403)
+            if req.url.params.get('dates') == '202612':
+                return httpx.Response(403)
+            return httpx.Response(200, json={'events': [espn_event()]})
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             store = Fixtures(client)
             snap = await store.get('basketball')
             self.assertEqual(len(snap.games), 1)
             self.assertEqual(snap.games[0].source, 'ESPN')
+            self.assertEqual(snap.successes, 2)
             self.assertEqual(len(calls), 3)
             await store.close()
 

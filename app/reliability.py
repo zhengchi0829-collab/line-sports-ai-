@@ -25,7 +25,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.7.6"
+VERSION = "0.7.7"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -360,7 +360,7 @@ class Fixtures:
         if time.monotonic() < self.cooldown.get(name, 0):
             return [], name + ":cooldown"
         try:
-            async with asyncio.timeout(4.0):
+            async with asyncio.timeout(8.0):
                 response = await self.client.get(url, params=params)
                 response.raise_for_status()
                 if kind == "tpbl_html":
@@ -378,10 +378,11 @@ class Fixtures:
                             teams = [name for name in names if name in text_body]
                     if not date_match or len(teams) < 2:
                         raise ValueError("TPBL game page parse failed")
-                    year = datetime.now(TZ).year
+                    today = datetime.now(TZ)
                     month, day, hm = date_match.groups()
-                    # 2026-27 season pages currently in late 2026/early 2027.
-                    y = year if int(month) >= 7 else year + 1
+                    # Winter fixtures belong to the season that began last summer.
+                    season_start = today.year if today.month >= 7 else today.year - 1
+                    y = season_start if int(month) >= 7 else season_start + 1
                     dt = datetime.strptime(f"{y}-{month}-{day} {hm}", "%Y-%m-%d %H:%M").replace(tzinfo=TZ)
                     # Official page text is away first, home second.
                     away, home = teams[0], teams[1]
@@ -434,12 +435,19 @@ class Fixtures:
                     feeds.append(("openliga_backup", f"https://api.openligadb.de/getmatchdata/bl1/{season}", {}, "openliga"))
                 return feeds
         if sport == "basketball":
+            # The NBA CDN consistently returns 403 in the free Render region.
+            # ESPN supports month-form YYYYMM (not a dashed date range);
+            # cover both this and next month so upcoming NBA games remain visible.
+            base = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard"
+            first = now.replace(day=1)
+            second = (first + timedelta(days=32)).replace(day=1)
             return [
-                ("nba_schedule", "https://cdn.nba.com/static/json/staticData/scheduleLeagueV2_1.json", {}, "nba_schedule"),
-                ("nba_espn_today", "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard",
-                 {"dates": now.strftime("%Y%m%d")}, "espn"),
-                ("nba_espn_next", "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard",
-                 {"dates": (now + timedelta(days=1)).strftime("%Y%m%d")}, "espn"),
+                ("nba_espn_month_" + month.strftime("%Y%m"), base,
+                 {"dates": month.strftime("%Y%m"), "limit": 250}, "espn")
+                for month in (first, second)
+            ] + [
+                ("nba_espn_today", base,
+                 {"dates": now.strftime("%Y%m%d"), "limit": 100}, "espn")
             ]
         if sport == "basketball_ncaa":
             return [
@@ -614,7 +622,7 @@ class Fixtures:
             task = asyncio.create_task(self.refresh(sport))
             self.jobs[sport] = task
         try:
-            return await asyncio.wait_for(asyncio.shield(task), timeout=3.2)
+            return await asyncio.wait_for(asyncio.shield(task), timeout=6.0)
         except (TimeoutError, httpx.HTTPError):
             if old and time.monotonic() - old[0] < 21600:
                 return Snapshot(old[1].games, old[1].fetched, ["refresh_timeout"], 0, True)
@@ -640,7 +648,7 @@ def select_games(games: list[Game], now: datetime, today: bool = False,
     else:
         valid = [g for g in games if g.state == "live" or g.start >= now or
                  (not g.time_known and g.start.date() >= now.date())]
-    return sorted(valid, key=lambda g: (g.state != "live", g.start))[:8]
+    return sorted(valid, key=lambda g: (g.state != "live", g.start))[:12]
 
 
 def text(value: str, size="sm", color="#334155", weight="regular") -> dict:
