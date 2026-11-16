@@ -817,7 +817,12 @@ class OddsGateway:
                 matching.append((captured, candidate, is_third_party))
             if not matching:
                 return []
-            captured_at, record, third_party = max(matching, key=lambda x: x[0])
+            # A newly verified official-page response outranks third-party
+            # references even if those were captured a few minutes later.
+            live = next((item for item in matching
+                         if item[1] is self.tw_live), None)
+            captured_at, record, third_party = (
+                live if live is not None else max(matching, key=lambda x: x[0]))
             leagues = record.get("leagues")
             if not isinstance(leagues, dict) or league not in JSPORTS:
                 return []
