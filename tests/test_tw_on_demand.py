@@ -54,5 +54,6 @@ class TaiwanOnDemandTests(unittest.IsolatedAsyncioTestCase):
             gateway = OddsGateway(client)
             self.assertEqual((await gateway.check_tw_public_now(NOW))["status"],
                              "no_verified_prices")
-            self.assertEqual(gateway.official_daily_rows(
-                "足球", NOW.date().isoformat()), [])
+            # A bad on-demand response must not manufacture new odds.
+            # Existing independently verified daily snapshots may still exist.
+            self.assertEqual(gateway.tw_live, {})
