@@ -25,7 +25,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.7.18"
+VERSION = "0.7.19"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -2168,13 +2168,17 @@ class Controller:
             raw = raw[2:]
         compact = re.sub(r"\s+", "", raw)
         if compact in ("體育集成檢查", "體育遊戲清單", "集成平台檢查", "集成遊戲清單"):
-            catalog = getattr(self, "integration_catalog", None)
-            if catalog is None:
-                message = "集成平台唯讀模組尚未啟動，現有賠率不受影響。"
-            else:
-                await catalog.check()
-                message = catalog.line_summary()
-            return [{"type": "text", "text": message[:4500],
+            # The provided tenant integration documents games, not fixture,
+            # statistics or price-feed endpoints. Never show demo-game links or
+            # present game catalogs as verified sports odds. Keep existing
+            # analysis and odds sources separate and unchanged.
+            return [{"type": "text",
+                     "text": ("🏟️ 體育數據查詢\n"
+                              "集成平台目前沒有已核實可用的體育賽事分析或賠率 API，"
+                              "因此沒有接入其遊戲清單。\n"
+                              "請使用「今日賽事」選擇對戰進行分析，"
+                              "或使用「檢視賠率」查看目前已核實的盤口。\n"
+                              "原有足球、籃球、棒球分析及賠率功能維持不變。"),
                      "quickReply": quick_menu()}]
         if compact in ("我的LINEID", "我的LINE用戶ID"):
             return [{"type": "text",

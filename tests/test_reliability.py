@@ -147,6 +147,37 @@ class ParserTests(unittest.TestCase):
 
 
 class AsyncTests(unittest.IsolatedAsyncioTestCase):
+    async def test_tenant_game_catalog_is_not_exposed_in_sports_bot(self):
+        """Former sports-trial commands are read-only local guidance, not API calls."""
+        requests = []
+        def handler(req):
+            requests.append(str(req.url))
+            raise AssertionError("A game-catalog API must never be called")
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            ctl = Controller(UI, client)
+            for command in ("體育集成檢查", "體育遊戲清單",
+                            "集成平台檢查", "集成遊戲清單"):
+                result = await ctl.reply(command)
+                shown = json.dumps(result, ensure_ascii=False)
+                self.assertIn("賠率", shown)
+                self.assertIn("沒有接入其遊戲清單", shown)
+                for blocked in ("試玩", "ATG", "百家樂", "SUPER體育",
+                                "AP體育", "FB體育", "TQ體育"):
+                    self.assertNotIn(blocked, shown)
+            self.assertEqual(requests, [])
+            await ctl.close()
+
+    async def test_odds_and_match_analysis_routes_remain_available(self):
+        async with httpx.AsyncClient(transport=httpx.MockTransport(
+                lambda req: httpx.Response(500))) as client:
+            ctl = Controller(UI, client)
+            odds = json.dumps(await ctl.reply("檢視賠率"), ensure_ascii=False)
+            self.assertIn("台灣運彩賠率", odds)
+            self.assertIn("娛樂平台賠率", odds)
+            analysis = json.dumps(await ctl.reply("賽事分析"), ensure_ascii=False)
+            self.assertIn("今日", analysis)
+            await ctl.close()
+
     async def test_ucl_five_games_backfilled_from_previous_season(self):
         kickoff = datetime(2026, 11, 25, 4, 0, tzinfo=TZ)
         fixture = Game('ucl-future', 'soccer', '歐冠', kickoff,
