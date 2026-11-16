@@ -30,7 +30,7 @@ from .reliability import (Controller, Game, Snapshot, SPORTS, TZ, VERSION,
                           select_games, SPECIFIED, holographic_messages,
                           odds_fixture_picker, odds_single_match_card,
                           odds_today_available, odds_available_menu,
-                          odds_status_card, verified_form_match)
+                          verified_form_match)
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
 log = logging.getLogger("sports_bot")
@@ -107,7 +107,7 @@ async def startup_probe(app):
         odds_ui = odds_category_menu()
         odds_actions = str(odds_ui)
         assert "台灣運彩賠率" in odds_actions and "娛樂平台賠率" in odds_actions
-        assert "賠率資料狀態" in odds_actions
+        assert "賠率資料狀態" not in odds_actions
         for provider in ("台灣運彩賠率", "娛樂平台賠率"):
             source = provider.removesuffix("賠率")
             sport_menu = odds_league_menu(provider)
@@ -184,7 +184,7 @@ async def startup_probe(app):
             log.info("line_message_validation status=%s version=%s", response.status_code, VERSION)
             new_cards = [date_category_menu("今日賽事"),
                          date_category_menu("未來賽事"),
-                         odds_category_menu(), odds_status_card(app.state.controller.odds),
+                         odds_category_menu(),
                          odds_source_card("台灣運彩賠率"),
                          odds_source_card("娛樂平台賠率"),
                          odds_league_menu("台灣運彩賠率",

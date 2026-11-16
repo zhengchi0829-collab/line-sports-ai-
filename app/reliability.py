@@ -25,7 +25,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.7.21"
+VERSION = "0.7.22"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -1168,67 +1168,6 @@ def jbot_trial_access(user_id: str | None) -> bool:
     return bool(user_id and user_id in allowed)
 
 
-def odds_status_card(gateway: OddsGateway) -> dict:
-    """Show only already-cached odds freshness, with zero paid API requests."""
-    day = datetime.now(TZ).date().isoformat()
-    counts = odds_today_available(gateway)
-    tw_total = sum(counts.values())
-    remote = gateway.tw_remote_status or {}
-    remote_state = remote.get("status", "not_checked")
-    last_checked = str(remote.get("captured_at") or
-                       remote.get("checked_at") or "尚無")
-
-    platform = gateway.daily if gateway.daily.get("day") == day else {}
-    platform_state = platform.get("state", "not_scheduled")
-    rows = platform.get("leagues") or {}
-    platform_total = sum(len(items) for items in rows.values()
-                         if isinstance(items, list))
-    if platform_state == "ready":
-        platform_note = (f"今日已完成定時批次｜可查詢 {platform_total} 場"
-                         if platform_total else "已完成定時批次，但沒有取得可顯示賽事")
-    elif platform_state == "quota":
-        platform_note = "免費額度不足，本日沒有執行扣額查詢"
-    elif platform_state == "missing_key":
-        platform_note = "未設定賠率 API 金鑰"
-    elif platform_state == "catalog_error":
-        platform_note = "今日資料來源連線失敗；不會重複扣額"
-    elif platform_state == "attempted":
-        platform_note = "已嘗試同步；目前沒有可用的已完成批次"
-    else:
-        platform_note = "今日 00:30 批次尚未建立或快取已失效"
-
-    tw_note = (f"今日留存 {tw_total} 筆參考賠率；非即時盤口"
-               if tw_total else "目前沒有可核對的今日賠率紀錄")
-    if remote_state == "stale_snapshot":
-        tw_note += "｜最新公開來源資料已過期"
-    elif remote_state == "ok":
-        tw_note += "｜公開參考來源已同步"
-
-    content = [
-        text("🇹🇼 台彩參考賠率", "md", "#0F766E", "bold"),
-        text(tw_note, "sm"),
-        text("最近檢查：" + last_checked, "xs", "#64748B"),
-        text("第三方來源僅供參考，非即時盤口，不等同台彩官網報價。", "xs", "#64748B"),
-        {"type": "separator", "margin": "sm"},
-        text("🎮 娛樂平台賠率", "md", "#0F766E", "bold"),
-        text(platform_note, "sm"),
-        text("每天台灣時間 00:30 更新；LINE 查詢只讀共用快取。", "xs", "#64748B"),
-        {"type": "separator", "margin": "sm"},
-        button("🇹🇼 台彩賠率", "台灣運彩賠率", "#0F766E"),
-        button("📊 平台賠率", "娛樂平台賠率", "#334155"),
-        button("🏠 主選單", MENU, "#334155"),
-    ]
-    return {"type": "flex", "altText": "賠率資料狀態｜來源、更新與可查筆數",
-            "quickReply": quick_menu(),
-            "contents": {"type": "bubble", "size": "kilo",
-                "header": {"type": "box", "layout": "vertical",
-                           "backgroundColor": "#0F172A", "paddingAll": "16px",
-                           "contents": [text("📡 賠率資料狀態", "lg", "#FFFFFF", "bold"),
-                                        text("沒有資料不代表沒有賽事", "sm", "#CBD5E1")]},
-                "body": {"type": "box", "layout": "vertical", "spacing": "sm",
-                         "paddingAll": "14px", "contents": content}}}
-
-
 def odds_category_menu() -> dict:
     return {"type": "flex", "altText": "賠率分析｜選擇來源",
             "quickReply": quick_menu(),
@@ -1240,7 +1179,6 @@ def odds_category_menu() -> dict:
                 "body": {"type": "box", "layout": "vertical", "spacing": "md",
                          "contents": [button("🇹🇼 台灣運彩賠率", "台灣運彩賠率", "#334155"),
                                       button("🎮 娛樂平台賠率", "娛樂平台賠率", "#334155"),
-                                      button("📡 賠率資料狀態", "賠率資料狀態", "#0F766E"),
                                       button("🏠 回主選單", MENU, "#334155")]}}}
 
 
@@ -2290,8 +2228,6 @@ class Controller:
             return [await self.category_fixtures(FUTURE, compact[len(FUTURE):])]
         if compact == "檢視賠率":
             return [odds_category_menu()]
-        if compact == "賠率資料狀態":
-            return [odds_status_card(self.odds)]
         if compact in ("賽事分析", "體育分析"):
             return [date_category_menu(TODAY)]
         if compact in ("台灣運彩賠率", "娛樂平台賠率"):
