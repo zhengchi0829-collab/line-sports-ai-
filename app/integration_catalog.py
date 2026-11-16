@@ -71,40 +71,82 @@ def classify_error(http_status: int, payload) -> str:
     return "http_" + str(http_status)
 
 
+SPORTS_TERMS = (
+    "體育", "体育", "運彩", "足彩", "足彩彩票", "足球", "籃球", "篮球",
+    "棒球", "網球", "网球", "排球", "冰球", "羽球", "羽毛球",
+    "高爾夫", "高尔夫", "賽馬", "赛马", "sportsbook", "sports",
+    "football", "soccer", "basketball", "baseball", "tennis",
+    "volleyball", "hockey", "golf", "cricket",
+)
+EXCLUDED_TERMS = (
+    "atg", "百家", "百家乐", "baccarat", "真人", "casino", "livecasino",
+    "slots", "slot", "老虎機", "老虎机", "電子", "电子", "捕魚", "捕鱼",
+    "棋牌", "輪盤", "轮盘", "roulette", "骰寶", "骰宝", "sicbo",
+    "麻將", "麻将", "blackjack", "二十一點", "二十一点", "鬥雞", "斗鸡",
+    "電競", "电竞", "esports", "e-sports",
+)
+
+
+def sports_only_game(row: object) -> bool:
+    """Allow only recognizable physical sports; deny casino/ATG first.
+
+    Provider codes are not trusted as proof that a particular *game* is a
+    sports offering. A mixed supplier may provide both casino and sports.
+    """
+    if not isinstance(row, dict):
+        return False
+    raw = " ".join(str(row.get(key) or "")
+                   for key in ("vendor_code", "name", "category"))
+    token = raw.casefold().replace(" ", "").replace("-", "")
+    if not token or any(term in token for term in EXCLUDED_TERMS):
+        return False
+    if row.get("is_active") is False or row.get("in_maintenance") is True:
+        return False
+    searchable = " ".join(str(row.get(key) or "")
+                          for key in ("name", "category")).casefold()
+    return any(term in searchable for term in SPORTS_TERMS)
+
+
 def summarize(rows, reported_total: int | None, more_pages: bool):
-    """Whitelist only public game-catalog fields. Never relay raw JSON."""
-    vendors, categories, examples = set(), {}, []
-    sport_candidates = []
+    """Keep ONLY sports-related game titles and provider labels in memory.
+
+    We must scan the tenant's mixed catalog, but Baccarat/ATG/slots/casino
+    records are immediately discarded and cannot enter LINE output.
+    """
+    vendors, categories, entries = set(), {}, []
+    seen = set()
     for row in rows:
-        if not isinstance(row, dict):
+        if not sports_only_game(row):
             continue
-        vendor = str(row.get("vendor_code") or "").strip()[:25]
-        category = str(row.get("category") or "未分類").strip()[:40]
-        name = str(row.get("name") or "").strip()[:65]
+        vendor = " ".join(str(row.get("vendor_code") or "").split())[:25]
+        category = " ".join(str(row.get("category") or "未分類").split())[:40]
+        name = " ".join(str(row.get("name") or "").split())[:65]
+        if not name:
+            continue
+        identity = (vendor, name, category)
+        if identity in seen:
+            continue
+        seen.add(identity)
         if vendor:
             vendors.add(vendor)
         categories[category] = categories.get(category, 0) + 1
-        if len(examples) < 8 and name:
-            examples.append({"vendor": vendor, "name": name,
-                             "category": category})
-        joined = (vendor + " " + category + " " + name).casefold()
-        if any(x in joined for x in ("sport", "體育", "運彩", "lottery", "彩票")):
-            if len(sport_candidates) < 12:
-                sport_candidates.append({"vendor": vendor,
-                                         "name": name, "category": category})
+        # A bounded sports-only subset; no private user/transaction records.
+        if len(entries) < 40:
+            entries.append({"vendor": vendor, "name": name,
+                            "category": category})
     return {
         "status": "ok",
-        "records_read": len(rows),
-        "reported_total": reported_total if isinstance(reported_total, int) else None,
-        "partial": bool(more_pages),
+        "records_read": len(entries),
+        "catalog_scanned": len(rows),
+        "catalog_truncated": bool(more_pages),
+        "sports_count": len(seen),
         "vendor_count": len(vendors),
         "vendor_codes": sorted(vendors)[:30],
         "categories": dict(sorted(categories.items(),
                                   key=lambda p: (-p[1], p[0]))[:20]),
-        "examples": examples,
-        "sport_candidates": sport_candidates,
+        "sports_entries": entries,
         "sports_odds_api": False,
-        "scope": "game_catalog_only",
+        "scope": "sports_games_read_only",
     }
 
 
@@ -115,7 +157,7 @@ class IntegrationCatalog:
         self.client = client
         self.lock = asyncio.Lock()
         self.last_check = 0.0
-        self.summary = {"status": "not_checked", "scope": "game_catalog_only",
+        self.summary = {"status": "not_checked", "scope": "sports_games_read_only",
                         "sports_odds_api": False}
 
     def configured(self) -> bool:
@@ -131,7 +173,7 @@ class IntegrationCatalog:
             self.last_check = time.monotonic()
             now = now or datetime.now(TZ)
             checked = now.astimezone(TZ).isoformat()
-            state = {"status": "not_configured", "scope": "game_catalog_only",
+            state = {"status": "not_configured", "scope": "sports_games_read_only",
                      "sports_odds_api": False, "checked_at": checked}
             if not self.configured():
                 self.summary = state
@@ -225,20 +267,23 @@ class IntegrationCatalog:
             else:
                 state["records_read"] = len(all_rows)
             self.summary = state
-            log.info("integration_catalog status=%s http=%s records=%s vendors=%s partial=%s",
+            log.info("integration_catalog status=%s http=%s sports_records=%s sports_vendors=%s scan_partial=%s",
                      state["status"], state.get("http_status", 200),
                      state.get("records_read", 0),
                      state.get("vendor_count", 0), state.get("partial", False))
             if state["status"] == "ok":
-                log.info("integration_catalog_public_labels vendors=%s categories=%s sport_candidate_vendors=%s",
+                log.info("integration_sports_only vendors=%s games=%s",
                          ",".join(state.get("vendor_codes", [])),
-                         ",".join(state.get("categories", {}).keys()),
-                         ",".join(sorted({row.get("vendor", "") for row in
-                                           state.get("sport_candidates", [])})))
+                         " | ".join(
+                             f"{row['vendor']}:{row['name']}"
+                             for row in state.get("sports_entries", [])[:20])))
             return state
 
     def line_summary(self) -> str:
-        """No credential or raw customer fields are included in LINE messages."""
+        """Display only verified category/name matches for sports games.
+
+        A game listing is not an odds API or evidence of sportsbook prices.
+        """
         info = self.summary
         status = info.get("status", "not_checked")
         if status != "ok":
@@ -250,20 +295,29 @@ class IntegrationCatalog:
                 "unauthorized": "API Token 無效或租戶沒有權限",
                 "tenant_disabled": "租戶已停用",
                 "network_ConnectError": "無法連線到集成平台",
-                "selection_requires_member": "需要會員帳號的個人化遊戲選單（未取會員資料）",
+                "selection_requires_member": "需會員帳號才能取得個人化選單（未讀取會員資料）",
             }
-            return "🔎 集成平台唯讀檢查\n狀態：" + notes.get(status, status) + "\n現有體育賠率不受影響。"
-        codes = ", ".join(info.get("vendor_codes", [])[:16]) or "無"
-        category_lines = "、".join(
-            f"{name} {count}" for name, count in
-            list(info.get("categories", {}).items())[:8]) or "無"
-        sports = ("有體育類型關鍵字，尚待確認是不是賠率供應商"
-                  if info.get("sport_candidates") else "未發現明確體育類型")
-        return (
-            "🔎 集成平台唯讀檢查\n"
-            f"遊戲清單：{info.get('records_read', 0)} 筆\n"
-            f"遊戲商：{info.get('vendor_count', 0)} 家（{codes}）\n"
-            f"分類：{category_lines}\n"
-            f"體育線索：{sports}\n"
-            "注意：這不是台彩體育賠率 API；既有賠率功能未變更。"
-        )
+            return ("🏟️ 體育集成｜唯讀檢查\n"
+                    "狀態：" + notes.get(status, status) +
+                    "\n原本台彩與娛樂平台賠率功能未變更。")
+        entries = info.get("sports_entries", [])
+        if not entries:
+            return ("🏟️ 體育集成｜唯讀清單\n"
+                    "目前在已授權的遊戲清單中，沒有找到可明確認定的體育遊戲。\n"
+                    "百家樂、ATG、電子及其他非體育項目均不顯示。\n"
+                    "這份遊戲清單不是台彩體育賠率 API；現有賠率功能不變。")
+        lines = [
+            "🏟️ 體育集成｜唯讀清單",
+            f"體育類項目：{info.get('sports_count', len(entries))} 筆",
+            f"體育類供應商：{info.get('vendor_count', 0)} 家",
+        ]
+        for entry in entries[:18]:
+            lines.append(f"• {entry['name']}（{entry['vendor']}）")
+        if info.get("sports_count", len(entries)) > 18:
+            lines.append("其他體育項目已省略")
+        lines.extend((
+            "已排除百家樂、ATG、電子及其他非體育遊戲。",
+            "注意：僅是體育遊戲清單，不是台彩體育賠率 API。",
+            "原本的體育賽事分析與賠率功能維持不變。",
+        ))
+        return "\n".join(lines)[:4500]

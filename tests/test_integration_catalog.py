@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from app.integration_catalog import (IntegrationCatalog, safe_base, signature,
-                                     classify_error, summarize, TZ)
+                                     classify_error, summarize, sports_only_game, TZ)
 
 
 NOW = datetime(2026, 11, 16, 21, 32, tzinfo=TZ)
@@ -75,12 +75,16 @@ class CatalogTests(unittest.IsolatedAsyncioTestCase):
                 catalog = IntegrationCatalog(client)
                 status = await catalog.check(NOW)
                 self.assertEqual(status["status"], "ok")
-                self.assertEqual(status["vendor_count"], 2)
-                self.assertEqual(status["records_read"], 2)
-                self.assertEqual(status["reported_total"], 2)
-                self.assertTrue(status["sport_candidates"])
+                self.assertEqual(status["vendor_count"], 1)
+                self.assertEqual(status["records_read"], 1)
+                self.assertEqual(status["sports_count"], 1)
+                self.assertEqual(status["catalog_scanned"], 2)
+                self.assertEqual([x["name"] for x in status["sports_entries"]],
+                                 ["Sports Demo"])
                 self.assertFalse(status["sports_odds_api"])
                 self.assertIn("不是台彩體育賠率 API", catalog.line_summary())
+                self.assertNotIn("遊戲A", catalog.line_summary())
+                self.assertNotIn("電子", str(status["sports_entries"]))
                 await catalog.check(NOW)
                 self.assertEqual(len(seen), 1)
 
@@ -119,3 +123,52 @@ class CatalogTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SportsOnlyFilteringTests(unittest.TestCase):
+    def test_keep_football_basketball_baseball_and_real_sportsbooks(self):
+        for name in ("足球體育", "NBA 籃球", "MLB 棒球",
+                     "Super Sportsbook", "台灣運彩", "European football"):
+            self.assertTrue(sports_only_game({
+                "name": name, "category": "未分類", "vendor_code": "TEST"
+            }), name)
+
+    def test_exclude_all_casino_atg_and_esports(self):
+        for name in ("ATG電子", "真人百家樂", "Baccarat Table",
+                     "ATG Sportsbook", "百家樂體育場",
+                     "Slots 体育", "電競Esports", "捕魚", "輪盤"):
+            self.assertFalse(sports_only_game({
+                "name": name, "category": "未分類", "vendor_code": "TEST"
+            }), name)
+
+    def test_exclude_casino_category_even_if_title_says_sports(self):
+        self.assertFalse(sports_only_game({
+            "name": "SPORTS CLUB", "category": "真人娛樂",
+            "vendor_code": "GCTEST"}))
+        self.assertFalse(sports_only_game({
+            "name": "Football", "category": "未分類",
+            "vendor_code": "ATGTEST"}))
+
+    def test_no_non_sport_vendor_or_example_in_summary(self):
+        original = [
+            {"vendor_code": "ATGTEST", "name": "ATG slots", "category": "電子"},
+            {"vendor_code": "BACCAT", "name": "真人百家樂", "category": "真人"},
+            {"vendor_code": "TQTEST", "name": "體育賽事", "category": "未分類"},
+            {"vendor_code": "FBTEST", "name": "Football", "category": "體育"},
+            {"vendor_code": "FBTEST", "name": "Slot Machine", "category": "電子"},
+        ]
+        record = summarize(original, len(original), False)
+        self.assertEqual(record["sports_count"], 2)
+        self.assertEqual(record["records_read"], 2)
+        self.assertEqual(record["vendor_codes"], ["FBTEST", "TQTEST"])
+        as_text = json.dumps(record, ensure_ascii=False)
+        self.assertNotIn("ATGTEST", as_text)
+        self.assertNotIn("BACCAT", as_text)
+        self.assertNotIn("真人百家", as_text)
+        self.assertNotIn("Slot Machine", as_text)
+
+    def test_unverified_casino_returns_empty_sports_result(self):
+        data = summarize([{"vendor_code": "ATGTEST", "name": "百家樂體育",
+                           "category": "真人"}], 1, False)
+        self.assertEqual(data["sports_entries"], [])
+        self.assertEqual(data["vendor_codes"], [])
