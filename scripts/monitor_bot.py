@@ -1,4 +1,8 @@
-"""GitHub Actions health probe. No secrets or paid APIs are required."""
+"""Scheduled read-only production health probe with structured triage.
+
+Restartable failures are separate from external data/API failures; the monitor
+never claims that restarting can repair a blocked odds or fixture provider.
+"""
 import argparse
 import json
 import sys
@@ -10,92 +14,127 @@ from urllib.request import Request, urlopen
 BASE = "https://line-sports-ai-bot.onrender.com"
 
 
-def get_json(base, path, timeout=85):
+class MonitorError(ValueError):
+    def __init__(self, code, message, restartable=False):
+        super().__init__(message)
+        self.code = code
+        self.restartable = restartable
+
+
+def get_json(base, path, timeout=80):
     request = Request(base.rstrip("/") + path, headers={
-        "User-Agent": "line-sports-ai-monitor/1.0",
+        "User-Agent": "line-sports-ai-health/2.0",
         "Accept": "application/json",
     })
     with urlopen(request, timeout=timeout) as response:
         if response.status != 200:
-            raise ValueError(f"{path} HTTP {response.status}")
-        payload = json.loads(response.read(100000).decode("utf-8"))
-    if not isinstance(payload, dict):
-        raise ValueError(f"{path} returned non-object JSON")
-    return payload
+            raise ValueError("%s HTTP %s" % (path, response.status))
+        data = json.loads(response.read(120000).decode("utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError(path + " returned non-object JSON")
+    return data
 
 
 def check(base):
-    health = get_json(base, "/health")
+    try:
+        health = get_json(base, "/health")
+        features = get_json(base, "/health/features")
+    except Exception as exc:
+        raise MonitorError("service_unreachable",
+                           "Health endpoints unavailable: " + type(exc).__name__,
+                           True) from exc
     if health.get("status") != "ok" or health.get("service") != "line-sports-ai":
-        raise ValueError("Health endpoint did not report ready")
-    features = get_json(base, "/health/features")
+        raise MonitorError("service_not_ready", "Bot health endpoint is not ready", True)
     if features.get("version") != health.get("version"):
-        raise ValueError("Version disagreement between health endpoints")
+        raise MonitorError("version_mismatch", "Service version mismatch", True)
     refresh = features.get("background_refresh") or {}
     if refresh.get("active") is not True:
-        raise ValueError("Background fixture refresh is inactive")
+        raise MonitorError("background_inactive", "Background fixture refresher inactive", True)
+    age = time.time()
     last = refresh.get("last_run_epoch")
-    if isinstance(last, (float, int)) and time.time() - last > 1200:
-        raise ValueError("Background fixture refresh has been stale for over 20 minutes")
     started = features.get("bot_started_epoch")
-    if last is None and isinstance(started, (float, int)) and time.time() - started > 240:
-        raise ValueError("Background fixture refresh never started")
+    if isinstance(last, (int, float)) and age - last > 1200:
+        raise MonitorError("stale_refresh", "Background fixture refresh stale > 20 min", True)
+    if last is None and isinstance(started, (int, float)) and age - started > 300:
+        raise MonitorError("refresh_never_started",
+                           "Background refresh did not start within five minutes", True)
     counts = refresh.get("counts") or {}
-    if any(isinstance(value, int) and value < 0 for value in counts.values()):
-        raise ValueError("One or more fixture providers failed to refresh")
+    if any(isinstance(val, int) and val < 0 for val in counts.values()):
+        raise MonitorError("worker_failure", "At least one fixture worker crashed", True)
     successes = refresh.get("source_successes") or {}
-    missing = [name for name in ("soccer_ucl", "soccer_epl", "basketball")
-               if name in successes and successes[name] == 0]
+    missing = [s for s in ("soccer_ucl", "soccer_epl", "basketball")
+               if s in successes and successes[s] == 0]
     if missing:
-        raise ValueError("Core fixture sources failed: " + ", ".join(missing))
+        raise MonitorError("upstream_failed", "Core fixture sources failed: " + ", ".join(missing))
     errors = refresh.get("source_errors") or {}
-    failed_requests = sum(len(rows) for rows in errors.values() if isinstance(rows, list))
-    if failed_requests >= 8:
-        raise ValueError("Many fixture sources failed in the latest refresh: " +
-                         str(failed_requests))
+    failure_count = sum(len(values) for values in errors.values()
+                        if isinstance(values, list))
+    if failure_count >= 8:
+        raise MonitorError("upstream_failed",
+                           "Many external fixture sources failed: %s" % failure_count)
     webhook = features.get("line_webhook") or {}
     if webhook.get("status") in {
         "inactive", "missing_token", "repair_failed", "api_error",
         "test_failed", "exception",
     }:
-        raise ValueError("LINE webhook check failed: " + str(webhook.get("status")))
-    if (webhook.get("status") == "checking"
-            and isinstance(started, (float, int)) and time.time() - started > 240):
-        raise ValueError("LINE webhook validation has not completed")
+        raise MonitorError("webhook_external",
+                           "LINE webhook status: " + str(webhook.get("status")))
+    if (webhook.get("status") == "checking" and
+            isinstance(started, (int, float)) and age - started > 300):
+        raise MonitorError("webhook_external", "LINE webhook validation timed out")
     richmenu = features.get("richmenu") or {}
     if richmenu.get("action_count") == 0:
-        raise ValueError("LINE rich menu has no actions")
-    return ("OK " + str(health.get("version")) +
-            "; cached providers=" + str(len(features.get("providers") or {})) +
-            "; webhook=" + str(webhook.get("status", "checking")))
+        raise MonitorError("richmenu_missing", "LINE rich menu has no actions", True)
+    return ("OK version=" + str(health.get("version")) +
+            " cached_sports=" + str(len(features.get("providers") or {})) +
+            " webhook=" + str(webhook.get("status", "checking")) +
+            " source_warnings=" + str(failure_count))
 
 
-def run(base, report, max_attempts=3, sleep=time.sleep):
+def run(base, report, max_attempts=3, sleep=time.sleep, diagnostics=None):
     errors = []
+    last_error = None
     for attempt in range(max_attempts):
         try:
-            result = check(base)
+            summary = check(base)
+            result = ("Checked UTC: " + datetime.now(timezone.utc).isoformat() +
+                      "\n" + summary + "\n")
+            report.write_text(result, encoding="utf-8")
+            if diagnostics:
+                diagnostics.write_text(json.dumps({"ok": True, "restartable": False,
+                                                    "code": "healthy"}), encoding="utf-8")
+            print(result)
+            return 0
+        except MonitorError as exc:
+            last_error = exc
+            errors.append(exc.code + ": " + str(exc)[:240])
         except Exception as exc:
-            errors.append(type(exc).__name__ + ": " + str(exc)[:400])
-            if attempt + 1 < max_attempts:
-                sleep(12)
-            continue
-        output = ("Time UTC: " + datetime.now(timezone.utc).isoformat() +
-                  "\n" + result + "\n")
-        report.write_text(output, encoding="utf-8")
-        print(output)
-        return 0
-    output = ("Time UTC: " + datetime.now(timezone.utc).isoformat() +
+            last_error = MonitorError("unexpected_probe_error",
+                                      type(exc).__name__, False)
+            errors.append("unexpected_probe_error: " + type(exc).__name__)
+        if attempt + 1 < max_attempts:
+            sleep(12)
+    result = ("Checked UTC: " + datetime.now(timezone.utc).isoformat() +
               "\nFAILED after " + str(max_attempts) + " attempts\n" +
-              "\n".join(errors) + "\n")
-    report.write_text(output, encoding="utf-8")
-    print(output, file=sys.stderr)
+              "\n".join(errors) + "\n" +
+              "Auto-redeploy permitted: " +
+              str(bool(last_error and last_error.restartable)) + "\n")
+    report.write_text(result, encoding="utf-8")
+    if diagnostics:
+        diagnostics.write_text(json.dumps({
+            "ok": False,
+            "code": last_error.code if last_error else "unknown",
+            "restartable": bool(last_error and last_error.restartable),
+            "errors": errors,
+        }, ensure_ascii=False), encoding="utf-8")
+    print(result, file=sys.stderr)
     return 1
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--base", default=BASE)
-    parser.add_argument("--report", required=True, type=Path)
-    args = parser.parse_args()
-    sys.exit(run(args.base, args.report))
+    args = argparse.ArgumentParser()
+    args.add_argument("--base", default=BASE)
+    args.add_argument("--report", type=Path, required=True)
+    args.add_argument("--diagnostics", type=Path)
+    opt = args.parse_args()
+    sys.exit(run(opt.base, opt.report, diagnostics=opt.diagnostics))

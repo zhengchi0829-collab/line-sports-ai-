@@ -1,22 +1,24 @@
-"""Validate the external monitor without internet or secrets."""
+"""Tests for 30-minute monitoring and bounded self-recovery; no API calls."""
+import json
+import tempfile
 import time
 import unittest
+from pathlib import Path
 from unittest.mock import patch
-
-from scripts import monitor_bot
+from scripts import monitor_bot, auto_recover_bot
 
 
 class MonitorTests(unittest.TestCase):
     def payloads(self):
         now = time.time()
-        health = {"service": "line-sports-ai", "status": "ok", "version": "0.7.8"}
+        health = {"status": "ok", "service": "line-sports-ai", "version": "0.7.9"}
         features = {
-            "version": "0.7.8",
-            "bot_started_epoch": now - 120,
+            "version": "0.7.9", "bot_started_epoch": now - 150,
             "background_refresh": {
-                "active": True, "last_run_epoch": now - 20,
-                "counts": {"soccer_ucl": 12, "basketball": 18},
-                "source_successes": {"soccer_ucl": 2, "soccer_epl": 2, "basketball": 3},
+                "active": True, "last_run_epoch": now - 30,
+                "counts": {"soccer_ucl": 36, "basketball": 278},
+                "source_successes": {"soccer_ucl": 2, "soccer_epl": 2,
+                                     "basketball": 3},
                 "source_errors": {},
             },
             "line_webhook": {"status": "ready"},
@@ -26,7 +28,7 @@ class MonitorTests(unittest.TestCase):
         return health, features
 
     def check_payloads(self, health, features):
-        def feed(base, path, timeout=85):
+        def feed(base, path, timeout=80):
             return health if path == "/health" else features
         with patch.object(monitor_bot, "get_json", side_effect=feed):
             return monitor_bot.check("https://example.com")
@@ -35,32 +37,90 @@ class MonitorTests(unittest.TestCase):
         health, features = self.payloads()
         self.assertIn("OK", self.check_payloads(health, features))
 
-    def test_stale_background_refresh_is_detected(self):
+    def test_stale_background_is_restartable(self):
         health, features = self.payloads()
         features["background_refresh"]["last_run_epoch"] = time.time() - 1800
-        with self.assertRaisesRegex(ValueError, "stale"):
+        with self.assertRaises(monitor_bot.MonitorError) as error:
             self.check_payloads(health, features)
+        self.assertEqual(error.exception.code, "stale_refresh")
+        self.assertTrue(error.exception.restartable)
 
-    def test_all_critical_sources_failed_is_detected(self):
+    def test_failed_core_provider_not_restarted(self):
         health, features = self.payloads()
         features["background_refresh"]["source_successes"]["soccer_ucl"] = 0
-        with self.assertRaisesRegex(ValueError, "Core fixture"):
+        with self.assertRaises(monitor_bot.MonitorError) as error:
             self.check_payloads(health, features)
+        self.assertEqual(error.exception.code, "upstream_failed")
+        self.assertFalse(error.exception.restartable)
 
-    def test_repeated_provider_timeouts_are_detected(self):
+    def test_many_provider_errors_not_restarted(self):
         health, features = self.payloads()
         features["background_refresh"]["source_errors"] = {
-            "basketball_tpbl": ["timeout"] * 5,
-            "baseball_milb": ["timeout"] * 3,
+            "baseball_milb": ["timeout"] * 5, "basketball_tpbl": ["timeout"] * 3,
         }
-        with self.assertRaisesRegex(ValueError, "Many fixture"):
+        with self.assertRaises(monitor_bot.MonitorError) as error:
             self.check_payloads(health, features)
+        self.assertFalse(error.exception.restartable)
 
-    def test_bad_line_webhook_status_is_detected(self):
+    def test_line_webhook_errors_not_restarted(self):
         health, features = self.payloads()
         features["line_webhook"]["status"] = "test_failed"
-        with self.assertRaisesRegex(ValueError, "webhook"):
+        with self.assertRaises(monitor_bot.MonitorError) as error:
             self.check_payloads(health, features)
+        self.assertEqual(error.exception.code, "webhook_external")
+        self.assertFalse(error.exception.restartable)
+
+    def test_unreachable_web_server_is_restartable(self):
+        with patch.object(monitor_bot, "get_json", side_effect=TimeoutError()):
+            with self.assertRaises(monitor_bot.MonitorError) as error:
+                monitor_bot.check("https://example.com")
+        self.assertEqual(error.exception.code, "service_unreachable")
+        self.assertTrue(error.exception.restartable)
+
+    def test_diag_file_and_report_for_unrecoverable_error(self):
+        health, features = self.payloads()
+        features["background_refresh"]["source_successes"]["basketball"] = 0
+        with tempfile.TemporaryDirectory() as tmp:
+            report, diag = Path(tmp) / "report", Path(tmp) / "diag"
+            with patch.object(monitor_bot, "get_json",
+                              side_effect=[health, features]):
+                exit_code = monitor_bot.run("https://example.com", report,
+                                            max_attempts=1, diagnostics=diag)
+            self.assertEqual(exit_code, 1)
+            self.assertFalse(json.loads(diag.read_text())["restartable"])
+            self.assertIn("upstream_failed", report.read_text())
+
+
+class RecoveryPolicyTests(unittest.TestCase):
+    def test_not_restartable(self):
+        allowed, _ = auto_recover_bot.policy(
+            {"restartable": False, "ok": False},
+            [(100, "good deploy")], 10000)
+        self.assertFalse(allowed)
+
+    def test_redeploy_after_grace_period(self):
+        now = 20000
+        self.assertTrue(auto_recover_bot.policy(
+            {"restartable": True, "ok": False},
+            [(now - 1200, "normal deploy")], now)[0])
+
+    def test_recent_deploy_suppresses_redeploy(self):
+        now = 20000
+        self.assertFalse(auto_recover_bot.policy(
+            {"restartable": True, "ok": False},
+            [(now - 100, "new version")], now)[0])
+
+    def test_redeploy_cooldown_suppresses_repeat(self):
+        now = 20000
+        self.assertFalse(auto_recover_bot.policy(
+            {"restartable": True, "ok": False},
+            [(now - 1500, auto_recover_bot.PREFIX + ": unavailable")], now)[0])
+
+    def test_allow_when_recovery_cooldown_ended(self):
+        now = 20000
+        self.assertTrue(auto_recover_bot.policy(
+            {"restartable": True, "ok": False},
+            [(now - 8000, auto_recover_bot.PREFIX + ": unavailable")], now)[0])
 
 
 if __name__ == "__main__":
