@@ -124,8 +124,9 @@ async def startup_probe(app):
         no_odds = await app.state.controller.reply("分析NBA 未驗證主隊 vs 未驗證客隊")
         assert not any("獨贏賠率" in str(card) or "真實盤口" in str(card)
                        or "盤口更新：" in str(card) for card in no_odds)
-        # The live screenshot has 1X2 only, so analysis must explain the
-        # observed market and leave spread/total unavailable rather than invent.
+        # Validate quoted markets based on the *actual* snapshot fields.
+        # Screenshots sometimes have 1X2 only; verified published references
+        # may additionally contain totals. Never demand absent markets.
         today_tw = app.state.controller.odds.official_daily_rows(
             "足球", check_now.strftime("%Y-%m-%d"))
         if today_tw:
@@ -135,8 +136,17 @@ async def startup_probe(app):
             assert "獨贏分析" in card_text
             assert "盤口結論" in card_text
             assert "讓分分析：尚無完整實際盤口" in card_text
-            assert "大小分分析：尚無完整實際盤口" in card_text
-            log.info("tw_odds_market_analysis=passed count=%s", len(today_tw))
+            first = today_tw[0]
+            totals_available = (first.get("total") is not None and
+                                first.get("over_price") is not None and
+                                first.get("under_price") is not None)
+            if totals_available:
+                assert "大小分分析：" in card_text
+                assert "大小分分析：尚無完整實際盤口" not in card_text
+            else:
+                assert "大小分分析：尚無完整實際盤口" in card_text
+            log.info("tw_odds_market_analysis=passed count=%s totals=%s",
+                     len(today_tw), totals_available)
         today_available = odds_today_available(app.state.controller.odds)
         if sum(today_available.values()):
             home_menu = (await app.state.controller.reply("台灣運彩賠率"))[0]
