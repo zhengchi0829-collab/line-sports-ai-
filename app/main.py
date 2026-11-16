@@ -776,9 +776,13 @@ async def feature_health():
     platform = ctl.odds.daily
     return {"version": VERSION, "bot_started_epoch": app.state.bot_started_epoch,
             "line_message_validation": app.state.line_validation,
-            "integration_catalog": getattr(app.state, "integration_catalog", None).summary
-            if getattr(app.state, "integration_catalog", None) is not None
-            else {"status": "not_checked"},
+            # Public health endpoint gets status only, not the tenant's game list.
+            "integration_catalog": {
+                "status": getattr(app.state, "integration_catalog", None).summary.get(
+                    "status", "not_checked") if getattr(app.state, "integration_catalog", None)
+                is not None else "not_checked",
+                "scope": "game_catalog_only",
+            },
             "platform_odds": {
                 "day": platform.get("day"),
                 "status": platform.get("state", "not_attempted"),

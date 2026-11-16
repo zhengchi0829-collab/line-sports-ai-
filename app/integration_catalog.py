@@ -229,6 +229,12 @@ class IntegrationCatalog:
                      state["status"], state.get("http_status", 200),
                      state.get("records_read", 0),
                      state.get("vendor_count", 0), state.get("partial", False))
+            if state["status"] == "ok":
+                log.info("integration_catalog_public_labels vendors=%s categories=%s sport_candidate_vendors=%s",
+                         ",".join(state.get("vendor_codes", [])),
+                         ",".join(state.get("categories", {}).keys()),
+                         ",".join(sorted({row.get("vendor", "") for row in
+                                           state.get("sport_candidates", [])})))
             return state
 
     def line_summary(self) -> str:
