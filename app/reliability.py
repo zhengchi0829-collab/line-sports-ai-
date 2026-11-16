@@ -25,7 +25,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.7.15"
+VERSION = "0.7.16"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -2167,6 +2167,15 @@ class Controller:
         if demo:
             raw = raw[2:]
         compact = re.sub(r"\s+", "", raw)
+        if compact in ("集成平台檢查", "集成遊戲清單"):
+            catalog = getattr(self, "integration_catalog", None)
+            if catalog is None:
+                message = "集成平台唯讀模組尚未啟動，現有賠率不受影響。"
+            else:
+                await catalog.check()
+                message = catalog.line_summary()
+            return [{"type": "text", "text": message[:4500],
+                     "quickReply": quick_menu()}]
         if compact in ("我的LINEID", "我的LINE用戶ID"):
             return [{"type": "text",
                      "text": ("你的 LINE userId：\n" + user_id) if user_id

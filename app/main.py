@@ -22,6 +22,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import Response
 from .team_logos import rendered_team_logo, _badge as fallback_team_badge
 from .schedule import latest_analysis_slot, platform_refresh_window, platform_day
+from .integration_catalog import IntegrationCatalog
 
 from . import legacy as ui
 from .reliability import (Controller, Game, Snapshot, SPORTS, TZ, VERSION,
@@ -708,6 +709,8 @@ async def lifespan(app):
                                                      max_keepalive_connections=24)) as source_client, \
                httpx.AsyncClient(timeout=httpx.Timeout(5, connect=2)) as line_client:
         app.state.controller = Controller(ui, source_client)
+        app.state.integration_catalog = IntegrationCatalog(source_client)
+        app.state.controller.integration_catalog = app.state.integration_catalog
         app.state.team_logo_client = source_client
         # Log boolean readiness only. Never expose trial token or tester user IDs.
         log.info("jbot_trial_setup key_present=%s tester_ids_configured=%s",
@@ -715,6 +718,7 @@ async def lifespan(app):
                  bool(os.getenv("JBOT_TRIAL_USER_IDS", "").strip()))
         app.state.line_client = line_client
         platform_quota_probe = asyncio.create_task(check_platform_quota_once(app))
+        integration_probe = asyncio.create_task(app.state.integration_catalog.check())
         probe = asyncio.create_task(startup_probe(app))
         refresher = asyncio.create_task(continuous_refresh(app))
         dated_probe = asyncio.create_task(dated_flow_probe(app))
@@ -723,6 +727,7 @@ async def lifespan(app):
         richmenu_setup = asyncio.create_task(ui.ensure_persistent_rich_menu())
         yield
         platform_quota_probe.cancel()
+        integration_probe.cancel()
         probe.cancel()
         refresher.cancel()
         dated_probe.cancel()
@@ -734,7 +739,7 @@ async def lifespan(app):
             done, unfinished = await asyncio.wait(active, timeout=4)
             for task in unfinished:
                 task.cancel()
-        await asyncio.gather(platform_quota_probe, probe, refresher, dated_probe,
+        await asyncio.gather(platform_quota_probe, integration_probe, probe, refresher, dated_probe,
                              webhook_probe, richmenu_probe, richmenu_setup,
                              *active, return_exceptions=True)
         await app.state.controller.close()
@@ -771,6 +776,9 @@ async def feature_health():
     platform = ctl.odds.daily
     return {"version": VERSION, "bot_started_epoch": app.state.bot_started_epoch,
             "line_message_validation": app.state.line_validation,
+            "integration_catalog": getattr(app.state, "integration_catalog", None).summary
+            if getattr(app.state, "integration_catalog", None) is not None
+            else {"status": "not_checked"},
             "platform_odds": {
                 "day": platform.get("day"),
                 "status": platform.get("state", "not_attempted"),
