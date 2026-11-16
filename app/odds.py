@@ -7,6 +7,7 @@ import re
 import time
 import logging
 from scripts.update_tw_official_odds import parse_public_html, URL as TW_PUBLIC_URL
+from .schedule import platform_credit_budget, platform_market_plan
 
 log = logging.getLogger("sports_bot")
 from pathlib import Path
@@ -441,6 +442,8 @@ class OddsGateway:
             return "quota"
         if record.get("state") == "attempted":
             return "unavailable"
+        if league in record.get("deferred_leagues", []):
+            return "deferred"
         rows = record.get("leagues", {}).get(league, [])
         if rows:
             return "cached"
@@ -458,58 +461,97 @@ class OddsGateway:
             return []
         return record.get("leagues", {}).get(league, [])
 
-    async def _daily_platform_feed(self, league):
-        """The first tap preloads every available league, then all taps use cache.
+    async def refresh_platform_daily(self):
+        """Scheduled 00:30 Taiwan: one shared cost-controlled daily batch."""
+        await self._daily_platform_feed("NBA")
+        today = datetime.now(TZ).strftime("%Y-%m-%d")
+        summary = self.daily if self.daily.get("day") == today else {}
+        log.info(
+            "platform_odds_daily day=%s state=%s leagues=%s planned_credits=%s remaining=%s",
+            today, summary.get("state", "unavailable"),
+            len(summary.get("attempted_leagues", [])),
+            summary.get("credits_planned", 0),
+            summary.get("remaining", "unknown"),
+        )
+        return summary
 
-        Each sport requires its own The Odds API request. We check the remaining
-        free-plan credits via the zero-cost /sports endpoint before a daily batch.
+    async def _daily_platform_feed(self, league):
+        """Daily 00:30 batch only; user taps never call this method.
+
+        Read /v4/sports (no credit cost), budget remaining free credits across
+        remaining calendar days, and stage a durable-on-instance attempt marker
+        BEFORE all chargeable requests. On free Render, /tmp can reset on a
+        redeploy; strict cross-deployment exactly-once requires durable storage.
         """
-        day = datetime.now(TZ).strftime("%Y-%m-%d")
+        now = datetime.now(TZ)
+        day = now.strftime("%Y-%m-%d")
         async with self.daily_lock:
-            record = self.daily
-            if record.get("day") == day:
+            if self.daily.get("day") == day:
                 return self.stored_platform_rows(league)
             key = (os.getenv("ODDS_API_KEY") or os.getenv("THE_ODDS_API_KEY") or "").strip()
-            if not key or league not in KEYS:
+            if not key:
+                self._save_daily({"day": day, "state": "missing_key", "leagues": {}})
                 return []
             headers = {"x-api-key": key}
             try:
                 catalog_response = await self.client.get(
                     "https://api.the-odds-api.com/v4/sports/",
-                    headers=headers, timeout=5)
+                    headers=headers, timeout=6)
                 catalog_response.raise_for_status()
                 catalog = catalog_response.json()
                 if not isinstance(catalog, list):
-                    return []
-                available_keys = {sport.get("key") for sport in catalog
-                                  if isinstance(sport, dict) and sport.get("active")}
-                supported = [(label, sport_key) for label, sport_key in KEYS.items()
-                             if sport_key in available_keys]
-                not_offered = [label for label in KEYS if label not in {name for name, _ in supported}]
-                # Three markets in one US region consume at most 3 credits
-                # per league when data is present. Check quota before spending.
-                required_credits = 3 * len(supported)
-                remaining = int(catalog_response.headers.get("x-requests-remaining", "-1"))
-            except (httpx.HTTPError, ValueError, TypeError, KeyError):
+                    raise ValueError("Sports catalog must be an array")
+                raw = catalog_response.headers.get("x-requests-remaining", "")
+                if not raw.isdecimal():
+                    raise ValueError("Quota headers unavailable")
+                remaining = int(raw)
+            except (httpx.HTTPError, ValueError, TypeError, KeyError) as exc:
+                self._save_daily({
+                    "day": day, "state": "catalog_error",
+                    "leagues": {}, "error_type": type(exc).__name__,
+                })
                 return []
-            if remaining < required_credits:
-                self._save_daily({"day": day, "state": "quota",
-                                  "leagues": {}, "remaining": remaining})
+
+            active = {row.get("key") for row in catalog
+                      if isinstance(row, dict) and row.get("active")}
+            supported = [(label, sport_key) for label, sport_key in KEYS.items()
+                         if sport_key in active]
+            not_offered = [label for label, sport_key in KEYS.items()
+                           if sport_key not in active]
+            budget = platform_credit_budget(remaining, now)
+            plan = platform_market_plan(supported, budget, now)
+            planned = sum(len(markets.split(",")) for _, _, markets in plan)
+            deferred = [label for label, _ in supported
+                        if label not in {label for label, _, _ in plan}]
+            if not plan:
+                self._save_daily({
+                    "day": day, "state": "quota" if supported else "no_events",
+                    "leagues": {}, "remaining": remaining,
+                    "credits_budget": budget, "credits_planned": 0,
+                    "deferred_leagues": deferred, "not_offered": not_offered,
+                })
                 return []
-            # Save before requesting odds so repeated clicks cannot spend twice.
-            pending = {"day": day, "state": "attempted", "leagues": {},
-                       "remaining": remaining}
+
+            # Never make chargeable calls unless an attempt marker is saved.
+            pending = {
+                "day": day, "state": "attempted",
+                "leagues": {}, "remaining": remaining,
+                "credits_budget": budget, "credits_planned": planned,
+                "attempted_leagues": [name for name, _, _ in plan],
+                "deferred_leagues": deferred,
+                "not_offered": not_offered,
+            }
             if not self._save_daily(pending):
                 return []
 
-            async def fetch_one(label, sport_key):
+            async def fetch_one(label, sport_key, markets):
                 try:
                     response = await self.client.get(
                         f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds",
                         headers=headers,
-                        params={"regions": "us", "markets": "h2h,spreads,totals",
+                        params={"regions": "us", "markets": markets,
                                 "oddsFormat": "decimal"},
-                        timeout=6)
+                        timeout=8)
                     if response.status_code != 200:
                         return label, [], None, "api_error"
                     all_rows = theodds_normalize(response.json())
@@ -521,20 +563,36 @@ class OddsGateway:
                             seen.add(identity)
                             rows.append(row)
                     balance = response.headers.get("x-requests-remaining")
-                    return label, rows, int(balance) if balance is not None else None, ("ok" if rows else "no_events")
+                    return label, rows, (
+                        int(balance) if balance is not None and balance.isdecimal()
+                        else None), ("ok" if rows else "no_events")
                 except (httpx.HTTPError, ValueError, TypeError, KeyError):
                     return label, [], None, "api_error"
 
-            outcomes = await asyncio.gather(
-                *(fetch_one(label, sport_key) for label, sport_key in supported))
+            # Sequential requests avoid sudden concurrent consumption if a
+            # provider quota changes underneath our budget calculation.
+            outcomes = []
+            for label, sport_key, markets in plan:
+                outcome = await fetch_one(label, sport_key, markets)
+                outcomes.append(outcome)
+                if outcome[2] is not None and outcome[2] < 1:
+                    break
             leagues = {label: rows for label, rows, _, _ in outcomes}
-            balances = [balance for _, _, balance, _ in outcomes if balance is not None]
-            result = {"day": day, "state": "ready", "leagues": leagues,
-                      "remaining": min(balances) if balances else remaining,
-                      "attempted_leagues": [label for label, _ in supported],
-                      "not_offered": not_offered,
-                      "empty_leagues": [label for label, _, _, state in outcomes if state == "no_events"],
-                      "failed_leagues": [label for label, _, _, state in outcomes if state == "api_error"]}
+            balances = [balance for _, _, balance, _ in outcomes
+                        if balance is not None]
+            attempted = [label for label, _, _, _ in outcomes]
+            result = {
+                "day": day, "state": "ready", "leagues": leagues,
+                "remaining": min(balances) if balances else remaining,
+                "credits_budget": budget, "credits_planned": planned,
+                "attempted_leagues": attempted, "not_offered": not_offered,
+                "deferred_leagues": deferred + [
+                    label for label, _, _ in plan if label not in attempted],
+                "empty_leagues": [label for label, _, _, state in outcomes
+                                  if state == "no_events"],
+                "failed_leagues": [label for label, _, _, state in outcomes
+                                   if state == "api_error"],
+            }
             self._save_daily(result)
             return leagues.get(league, [])
 
@@ -876,7 +934,9 @@ class OddsGateway:
 
     async def feed(self, provider, league, date):
         if provider != "tw":
-            return await self._daily_platform_feed(league)
+            # Browsing LINE menus must never spend the account's shared quota.
+            # Quotes are populated by the 00:30 Taiwan background job only.
+            return self.stored_platform_rows(league)
         # Daily official snapshot takes priority over JBot trial quotes.
         official = self.official_daily_rows(league, date)
         if official:

@@ -4,13 +4,6 @@ on:
   # Legacy official-source diagnostic: no duplicate daily automatic fetch.
   # Hourly public-page updates are handled by tw-odds-10min.yml.
   workflow_dispatch:
-  push:
-    paths:
-      - ".github/workflows/taiwan-odds-update.yml"
-      - "scripts/update_tw_official_odds.py"
-      - "scripts/tw_browser_capture.py"
-      - "scripts/tw_playsport_fallback.py"
-      - "scripts/tw_odds_issue.py"
 
 permissions:
   contents: write

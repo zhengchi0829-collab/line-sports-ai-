@@ -25,7 +25,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.7.13"
+VERSION = "0.7.14"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -2328,6 +2328,12 @@ class Controller:
                     status = self.odds.daily_status(league_name)
                     reason = ("免費賠率額度不足以同步全部聯盟；本日暫不進行額外查詢。"
                               if status == "quota" else
+                              "為保留每月免費 Credits，本日未排程此聯賽；下次 00:30 再更新。"
+                              if status == "deferred" else
+                              "The Odds API 金鑰尚未設定，無法更新娛樂平台賠率。"
+                              if status == "missing_key" else
+                              "今日 00:30 的賠率來源／額度查詢失敗，不會重複扣額度。"
+                              if status == "catalog_error" else
                               "目前沒有開放此聯盟的賠率市場，並非程式故障。"
                               if status == "not_offered" else
                               "當前賠率來源沒有提供此聯盟的開盤賽事。"
