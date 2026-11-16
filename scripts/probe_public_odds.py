@@ -25,6 +25,22 @@ for url in URLS:
                 print("MATCH", term, index)
                 if index >= 0:
                     print("SNIPPET", re.sub(r"\s+", " ", html[max(0,index-400):index+650])[:900])
+            from tw_playsport_fallback import TableRows, groups, parse_football, TZ
+            from datetime import datetime
+            now = datetime.now(TZ)
+            parser = TableRows()
+            parser.feed(html)
+            parsed = parse_football(html, now.date(), cutoff=now)
+            print("PARSER rows:", len(parser.rows),
+                  "parsed:", {k:len(v) for k,v in parsed.items()})
+            selected = [group for group in groups(parser.rows)
+                        if group and (group[0]["id"].endswith("1047")
+                                      or group[0]["id"].endswith("1048"))]
+            for game in selected[:3]:
+                print("DEBUG_GAME", game[0]["id"], "rows", len(game))
+                for row in game[:4]:
+                    print("  CELL", [(c["class"], c["text"][:110])
+                                      for c in row["cells"]][:6])
             for piece in re.findall(r"<table\b[^>]*>", html, flags=re.I)[:12]:
                 print("TABLE", piece[:350])
     except (HTTPError, URLError) as exc:
