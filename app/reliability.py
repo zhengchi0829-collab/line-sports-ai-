@@ -25,7 +25,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.7.8"
+VERSION = "0.7.9"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -312,7 +312,9 @@ def parse_feed(kind: str, data: Any, include_final: bool = False) -> list[Game]:
                 h = next(c["team"] for c in comp["competitors"] if c.get("homeAway") == "home")
                 a = next(c["team"] for c in comp["competitors"] if c.get("homeAway") == "away")
                 is_soccer = kind.startswith("soccer_")
-                label = SOCCER_SLUG_LABELS.get(kind.removeprefix("soccer_"), "足球") if is_soccer else "NBA"
+                label = (SOCCER_SLUG_LABELS.get(kind.removeprefix("soccer_"), "足球")
+                         if is_soccer else
+                         {"basketball_ncaa": "NCAA", "basketball_nbl": "NBL"}.get(kind, "NBA"))
                 def espn_logo(team):
                     logos = team.get("logos", [])
                     return team.get("logo") or (logos[0].get("href", "") if logos else "")
@@ -452,16 +454,20 @@ class Fixtures:
         if sport == "basketball_ncaa":
             return [
                 ("ncaa_today", "https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard",
-                 {"dates": now.strftime("%Y%m%d"), "groups": "50", "limit": "100"}, "espn"),
+                 {"dates": now.strftime("%Y%m%d"), "groups": "50", "limit": "100"}, "basketball_ncaa"),
                 ("ncaa_next", "https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard",
-                 {"dates": (now + timedelta(days=1)).strftime("%Y%m%d"), "groups": "50", "limit": "100"}, "espn"),
+                 {"dates": (now + timedelta(days=1)).strftime("%Y%m%d"), "groups": "50", "limit": "100"}, "basketball_ncaa"),
             ]
         if sport == "basketball_nbl":
+            # The Australian NBL can have several rest days; a one-day lookahead
+            # reports no games even when the next round is already published.
+            base = "https://site.api.espn.com/apis/site/v2/sports/basketball/nbl/scoreboard"
+            first = now.replace(day=1)
+            second = (first + timedelta(days=32)).replace(day=1)
             return [
-                ("nbl_today", "https://site.api.espn.com/apis/site/v2/sports/basketball/nbl/scoreboard",
-                 {"dates": now.strftime("%Y%m%d")}, "espn"),
-                ("nbl_next", "https://site.api.espn.com/apis/site/v2/sports/basketball/nbl/scoreboard",
-                 {"dates": (now + timedelta(days=1)).strftime("%Y%m%d")}, "espn"),
+                (f"nbl_month_{month:%Y%m}", base,
+                 {"dates": month.strftime("%Y%m"), "limit": 250}, "basketball_nbl")
+                for month in (first, second)
             ]
         if sport == "basketball_tpbl":
             return [
@@ -506,7 +512,7 @@ class Fixtures:
         elif sport in ("basketball_ncaa", "basketball_nbl"):
             slug = "mens-college-basketball" if sport == "basketball_ncaa" else "nbl"
             base = f"https://site.api.espn.com/apis/site/v2/sports/basketball/{slug}/scoreboard"
-            result = [(f"{sport}_{d}", base, {"dates": d, "limit": 250}, "espn")
+            result = [(f"{sport}_{d}", base, {"dates": d, "limit": 250}, sport)
                       for d in dates]
         elif sport in SOCCER_LEAGUE_LABELS:
             league = SOCCER_LEAGUE_LABELS[sport]

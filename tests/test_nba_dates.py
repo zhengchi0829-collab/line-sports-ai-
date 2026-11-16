@@ -8,6 +8,13 @@ NOW = datetime(2026, 11, 12, 20, 0, tzinfo=TZ)
 
 
 class NBADateTests(unittest.IsolatedAsyncioTestCase):
+    async def test_nbl_future_schedule_looks_beyond_tomorrow(self):
+        async with httpx.AsyncClient() as client:
+            specs = Fixtures(client).specs('basketball_nbl', NOW)
+            dates = [params['dates'] for _, _, params, kind in specs]
+            self.assertEqual(dates, ['202611', '202612'])
+            self.assertTrue(all(kind == 'basketball_nbl' for _, _, _, kind in specs))
+
     async def test_nba_sources_use_months_and_current_date(self):
         async with httpx.AsyncClient() as client:
             specs = Fixtures(client).specs('basketball', NOW)

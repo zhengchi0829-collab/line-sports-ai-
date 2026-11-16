@@ -60,6 +60,14 @@ class UI:
 
 
 class ParserTests(unittest.TestCase):
+    def test_espn_basketball_leagues_are_labeled_correctly(self):
+        for kind, expected in (('basketball_ncaa', 'NCAA'),
+                               ('basketball_nbl', 'NBL'),
+                               ('espn', 'NBA')):
+            games = parse_feed(kind, {'events': [espn_event()]})
+            self.assertEqual(len(games), 1)
+            self.assertEqual(games[0].league, expected)
+
     def test_ucl_event_keeps_authoritative_club_ids(self):
         event = espn_event()
         event['competitions'][0]['competitors'][0]['team']['id'] = 'H'
