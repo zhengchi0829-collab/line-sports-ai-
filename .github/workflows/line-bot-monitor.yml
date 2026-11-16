@@ -1,9 +1,12 @@
-name: LINE Sports AI - 30-minute auto-recovery monitor
+name: LINE Sports AI - 10-minute health and safe auto-recovery
 
 on:
   schedule:
-    # UTC minute 13 and 43: every 30 minutes, including Taiwan time.
-    - cron: "13,43 * * * *"
+    # Every 10 minutes, UTC and Taiwan use the same minute positions.
+    - cron: "7,17,27,37,47,57 * * * *"
+    # Wake Render's free web service around the requested local update slots.
+    - cron: "30 16 * * *"     # 00:30 Taiwan / platform odds
+    - cron: "0 1,7,12 * * *" # 09:00, 15:00, 20:00 Taiwan / analysis
   workflow_dispatch:
   push:
     paths:

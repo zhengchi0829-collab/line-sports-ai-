@@ -1,9 +1,8 @@
-name: Taiwan Sports Lottery - 09 15 20 updates
+name: Taiwan Sports Lottery - manual source recovery
 
 on:
-  schedule:
-    # GitHub cron runs in UTC; Taiwan is UTC+8.
-    - cron: "0 1,7,12 * * *"
+  # Legacy official-source diagnostic: no duplicate daily automatic fetch.
+  # Hourly public-page updates are handled by tw-odds-10min.yml.
   workflow_dispatch:
   push:
     paths:

@@ -1,4 +1,4 @@
-"""Tests for 30-minute monitoring and bounded self-recovery; no API calls."""
+"""Tests for 10-minute monitoring and bounded self-recovery; no API calls."""
 import json
 import tempfile
 import time

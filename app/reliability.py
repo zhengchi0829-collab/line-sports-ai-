@@ -25,7 +25,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.7.12"
+VERSION = "0.7.13"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -607,8 +607,10 @@ class Fixtures:
         snap = Snapshot(sorted(unique.values(), key=lambda g: g.start), now, errors,
                         sum(error is None for _, error in results))
         old = self.cache.get(sport)
-        self.retry_after[sport] = time.monotonic() + (60 if errors else 300)
-        if not snap.games and errors and old and old[1].games and time.monotonic() - old[0] < 21600:
+        # Three planned daily fixture refreshes; ordinary menu taps reuse cache.
+        # Explicit scheduler refresh() calls still bypass this per-tap cooldown.
+        self.retry_after[sport] = time.monotonic() + 14 * 3600
+        if not snap.games and errors and old and old[1].games and time.monotonic() - old[0] < 15 * 3600:
             cached_result = Snapshot(old[1].games, old[1].fetched, errors, snap.successes, True)
             self.last[sport] = cached_result
             return cached_result
@@ -630,7 +632,7 @@ class Fixtures:
         try:
             return await asyncio.wait_for(asyncio.shield(task), timeout=6.0)
         except (TimeoutError, httpx.HTTPError):
-            if old and time.monotonic() - old[0] < 21600:
+            if old and time.monotonic() - old[0] < 15 * 3600:
                 return Snapshot(old[1].games, old[1].fetched, ["refresh_timeout"], 0, True)
             return Snapshot(errors=["refresh_timeout"])
 

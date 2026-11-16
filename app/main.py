@@ -21,6 +21,7 @@ import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import Response
 from .team_logos import rendered_team_logo, _badge as fallback_team_badge
+from .schedule import latest_analysis_slot, platform_refresh_window, platform_day
 
 from . import legacy as ui
 from .reliability import (Controller, Game, Snapshot, SPORTS, TZ, VERSION,
@@ -457,16 +458,35 @@ REFRESH_KEYS = (
 
 
 async def continuous_refresh(app):
-    """Keep fixture caches warm while the service is running."""
-    # Give startup validation a short head start, then continuously refresh every 5 minutes.
+    """Schedule data refresh independently from the every-minute health pulse."""
     await asyncio.sleep(10)
     last_webhook_check = time.monotonic()
     while True:
         started = time.monotonic()
         try:
-            # Lightweight quote refresh: no application redeploy, no paid API.
-            # The GitHub odds-cache branch is updated on a 10-minute schedule.
+            now = datetime.now(TZ)
+            # Keep a health heartbeat even when no 3x/day fixture slot is due.
+            app.state.last_background_refresh = time.time()
+            # Reading GitHub's public odds-cache does NOT spend The Odds API credits.
+            # The cache writer runs hourly, not once per ten minutes.
             await app.state.controller.odds.refresh_remote_reference()
+            if platform_refresh_window(now):
+                day = platform_day(now)
+                if app.state.platform_scheduled_attempt_day != day:
+                    app.state.platform_scheduled_attempt_day = day
+                    if app.state.controller.odds.daily.get("day") != day:
+                        await app.state.controller.odds.refresh_platform_daily()
+                    else:
+                        log.info("scheduled_platform_odds day=%s already_cached=true", day)
+            if time.monotonic() - last_webhook_check >= 600:
+                last_webhook_check = time.monotonic()
+                await verify_line_webhook(app)
+            slot = latest_analysis_slot(now)
+            if app.state.last_fixture_refresh_slot == slot:
+                await asyncio.sleep(60)
+                continue
+            app.state.last_fixture_refresh_slot = slot
+            log.info("scheduled_fixture_refresh start slot=%s", slot)
             results = await asyncio.gather(
                 *(app.state.controller.fixtures.refresh(key) for key in REFRESH_KEYS),
                 return_exceptions=True,
@@ -490,9 +510,7 @@ async def continuous_refresh(app):
             app.state.background_refresh_counts = counts
             app.state.background_refresh_successes = source_successes
             app.state.background_refresh_errors = source_errors
-            if time.monotonic() - last_webhook_check >= 600:
-                last_webhook_check = time.monotonic()
-                await verify_line_webhook(app)
+            app.state.last_fixture_refresh_epoch = time.time()
             if not getattr(app.state, "team_translation_checked", False):
                 app.state.team_translation_checked = True
                 for key in REFRESH_KEYS:
@@ -630,7 +648,7 @@ async def continuous_refresh(app):
             raise
         except Exception as exc:
             log.error("background_refresh_error kind=%s", type(exc).__name__)
-        await asyncio.sleep(300)
+        await asyncio.sleep(60)
 
 
 async def check_platform_quota_once(app):
@@ -673,6 +691,9 @@ async def lifespan(app):
     app.state.events = {}
     app.state.line_validation = None
     app.state.last_background_refresh = None
+    app.state.last_fixture_refresh_slot = None
+    app.state.last_fixture_refresh_epoch = None
+    app.state.platform_scheduled_attempt_day = None
     app.state.background_refresh_counts = {}
     app.state.background_refresh_successes = {}
     app.state.background_refresh_errors = {}
@@ -754,7 +775,12 @@ async def feature_health():
                           for sport, item in ctl.fixtures.cache.items()},
             "background_refresh": {
                 "active": True,
-                "interval_seconds": 300,
+                "interval_seconds": 60,
+                "fixture_schedule_taipei": ["09:00", "15:00", "20:00"],
+                "last_fixture_slot": app.state.last_fixture_refresh_slot,
+                "last_fixture_refresh_epoch": app.state.last_fixture_refresh_epoch,
+                "platform_schedule_taipei": "00:30",
+                "platform_last_attempt_day": app.state.platform_scheduled_attempt_day,
                 "last_run_epoch": app.state.last_background_refresh,
                 "counts": app.state.background_refresh_counts,
                 "source_successes": app.state.background_refresh_successes,

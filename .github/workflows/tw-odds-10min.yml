@@ -1,9 +1,9 @@
-name: Taiwan Odds - every 10 minutes (no redeploy)
+name: Taiwan Odds - hourly public page refresh (no redeploy)
 
 on:
   schedule:
-    # UTC every 10 minutes, offset away from GitHub's busiest minute 0.
-    - cron: "4,14,24,34,44,54 * * * *"
+    # Every hour, Taiwan UTC+8. GitHub may start scheduled runs late.
+    - cron: "0 * * * *"
   workflow_dispatch:
   push:
     branches: [main]
@@ -45,8 +45,8 @@ jobs:
           cp "$RUNNER_TEMP/latest-odds.json" tw_third_party_odds.json
           git add -f tw_third_party_odds.json
           if git diff --cached --quiet; then
-            echo "Odds checked; snapshot unchanged"
+            echo "Hourly odds checked; snapshot unchanged"
           else
-            git commit -m "Update published Taiwan odds reference (10-minute check)"
+            git commit -m "Update Taiwan odds reference (hourly page check)"
             git push origin HEAD:refs/heads/odds-cache
           fi
