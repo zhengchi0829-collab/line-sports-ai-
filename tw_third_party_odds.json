@@ -1,41 +1,11 @@
 {
   "day": "2026-11-17",
-  "captured_at": "2026-11-17T03:45:11.262062+08:00",
+  "captured_at": "2026-11-17T04:36:57.593702+08:00",
   "source_url": "https://www.playsport.cc/gamesData/result?allianceid=4&gametime=20261117",
   "capture_method": "third_party_playsport",
   "source_note": "Third-party published Taiwan Sports Lottery reference odds. NOT verified with Taiwan Sports Lottery's live website. Please confirm against the official market before betting.",
   "leagues": {
     "足球": [
-      {
-        "event_id": "1013",
-        "away": "AD塔爾馬",
-        "home": "庫斯科",
-        "start": "2026-11-17T04:15:00+08:00",
-        "away_price": 3.55,
-        "home_price": 1.6,
-        "draw_price": 3.15,
-        "spread": null,
-        "spread_home_price": null,
-        "spread_away_price": null,
-        "total": 2.5,
-        "over_price": 1.63,
-        "under_price": 1.8
-      },
-      {
-        "event_id": "1014",
-        "away": "格勞競技",
-        "home": "莫克瓜體育",
-        "start": "2026-11-17T04:15:00+08:00",
-        "away_price": 4.0,
-        "home_price": 1.6,
-        "draw_price": 2.85,
-        "spread": null,
-        "spread_home_price": null,
-        "spread_away_price": null,
-        "total": 2.5,
-        "over_price": 1.96,
-        "under_price": 1.5
-      },
       {
         "event_id": "1016",
         "away": "CA拉斯皮耶德拉斯青年城",
@@ -48,8 +18,8 @@
         "spread_home_price": null,
         "spread_away_price": null,
         "total": 2.5,
-        "over_price": 1.76,
-        "under_price": 1.66
+        "over_price": 1.78,
+        "under_price": 1.65
       },
       {
         "event_id": "1019",
@@ -57,8 +27,8 @@
         "home": "加拿大",
         "start": "2026-11-17T09:00:00+08:00",
         "away_price": 7.75,
-        "home_price": 1.1,
-        "draw_price": 4.65,
+        "home_price": 1.11,
+        "draw_price": 4.6,
         "spread": null,
         "spread_home_price": null,
         "spread_away_price": null,
