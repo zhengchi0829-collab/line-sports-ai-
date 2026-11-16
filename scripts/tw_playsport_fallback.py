@@ -152,7 +152,7 @@ def parse_football(html, today, cutoff=None):
             continue
         info = next((c["text"] for c in first["cells"]
                      if "td-gameinfo" in c["class"]), "")
-        tm = re.search(r"\b(AM|PM)\s*(\d{1,2}):(\d{2})", info, re.I)
+        tm = re.search(r"(AM|PM)\s*(\d{1,2}):(\d{2})", info, re.I)
         if not tm:
             continue
         meridiem, hour, minute = tm.groups()

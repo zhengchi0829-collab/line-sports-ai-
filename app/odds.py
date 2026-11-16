@@ -393,6 +393,7 @@ class OddsGateway:
         self.daily = self._read_daily()
         self.public_blob_cache = {}
         self.official_snapshot_file = Path(__file__).resolve().parent / "tw_official_odds.json"
+        self.third_party_snapshot_file = Path(__file__).resolve().parent / "tw_third_party_odds.json"
         self.tw_live = {}
         self.tw_probe = {}
         self.tw_last_request = 0.0
@@ -714,13 +715,32 @@ class OddsGateway:
         must never be presented as real quotes.
         """
         try:
-            record = (self.tw_live if self.tw_live.get("day") == day and
-                      league in self.tw_live.get("leagues", {}) else
-                      json.loads(self.official_snapshot_file.read_text(encoding="utf-8")))
+            # Priority: verified public official page, official saved snapshot,
+            # then explicitly labeled public third-party references.
+            record = {}
+            if (self.tw_live.get("day") == day
+                    and league in (self.tw_live.get("leagues") or {})):
+                record = self.tw_live
+            else:
+                for path in (self.official_snapshot_file, self.third_party_snapshot_file):
+                    try:
+                        saved = json.loads(path.read_text(encoding="utf-8"))
+                    except (OSError, ValueError, TypeError):
+                        continue
+                    if (isinstance(saved, dict) and saved.get("day") == day
+                            and isinstance(saved.get("leagues"), dict)
+                            and saved["leagues"].get(league)):
+                        record = saved
+                        break
             if not isinstance(record, dict) or record.get("day") != day:
                 return []
-            if record.get("source_url") != (
-                    "https://www.sportslottery.com.tw/sportsbook/daily-coupons"):
+            official_url = "https://www.sportslottery.com.tw/sportsbook/daily-coupons"
+            third_url = ("https://www.playsport.cc/gamesData/result?"
+                         "allianceid=4&gametime=" + day.replace("-", ""))
+            third_party = (
+                record.get("capture_method") == "third_party_playsport"
+                and record.get("source_url") == third_url)
+            if record.get("source_url") != official_url and not third_party:
                 return []
             captured_at = parse_time(record.get("captured_at"))
             if captured_at is None or captured_at.strftime("%Y-%m-%d") != day:
@@ -737,7 +757,9 @@ class OddsGateway:
                     continue
                 # Keep the external snapshot isolated from provider labels.
                 clean = {
-                    "source": ("台灣運彩官網截圖（人工核對）"
+                    "source": ("台彩盤口（玩運彩第三方轉載，非官網核實）"
+                               if third_party else
+                               "台灣運彩官網截圖（人工核對）"
                                if record.get("capture_method") == "user_screenshot"
                                else "台灣運彩官網賽事表（每日快照）"),
                     "book": "台灣運彩",

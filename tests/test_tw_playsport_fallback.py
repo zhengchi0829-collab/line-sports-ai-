@@ -43,7 +43,7 @@ class PlaySportTests(unittest.TestCase):
     def test_robots_disallow_is_respected(self):
         def fetch(url):
             if url.endswith("/robots.txt"):
-                return "User-agent: *\\nDisallow: /gamesData/"
+                return "User-agent: *\nDisallow: /gamesData/"
             return HTML
         with self.assertRaisesRegex(ValueError, "ROBOTS_DISALLOW"):
             fetch_public_football(NOW.date(), fetch=fetch)
@@ -51,7 +51,7 @@ class PlaySportTests(unittest.TestCase):
     def test_source_is_labeled_as_third_party(self):
         def fetch(url):
             if url.endswith("/robots.txt"):
-                return "User-agent: *\\nAllow: /"
+                return "User-agent: *\nAllow: /"
             return HTML
         with tempfile.TemporaryDirectory() as folder:
             p=Path(folder) / "odds.json"
@@ -61,6 +61,34 @@ class PlaySportTests(unittest.TestCase):
             self.assertEqual(row["capture_method"],"third_party_playsport")
             self.assertIn("NOT verified",row["source_note"])
             self.assertEqual(len(row["leagues"]["足球"]),1)
+
+    def test_third_party_quotes_are_labeled_and_day_scoped(self):
+        from app.odds import OddsGateway
+        import httpx
+        with tempfile.TemporaryDirectory() as folder:
+            official = Path(folder) / "official.json"
+            third = Path(folder) / "third.json"
+            official.write_text('{"day":"2026-11-15"}', encoding="utf-8")
+            third.write_text(json.dumps({
+                "day": "2026-11-16",
+                "captured_at": NOW.isoformat(),
+                "source_url": "https://www.playsport.cc/gamesData/result?allianceid=4&gametime=20261116",
+                "capture_method": "third_party_playsport",
+                "leagues": {"足球": [{
+                    "away": "摩爾多瓦", "home": "法羅群島",
+                    "start": "2026-11-16T23:00:00+08:00",
+                    "away_price": 3.8, "home_price": 1.6, "draw_price": 2.85,
+                }]},
+            }, ensure_ascii=False), encoding="utf-8")
+            with httpx.Client() as client:
+                gateway = OddsGateway(client)
+                gateway.official_snapshot_file = official
+                gateway.third_party_snapshot_file = third
+                rows = gateway.official_daily_rows("足球", "2026-11-16")
+                self.assertEqual(len(rows), 1)
+                self.assertIn("第三方", rows[0]["source"])
+                self.assertEqual(rows[0]["away_price"], 3.8)
+                self.assertEqual(gateway.official_daily_rows("足球", "2026-11-17"), [])
 
     def test_unknown_html_never_invents_quotes(self):
         self.assertEqual(parse_football("<div>主1.5 客2.5</div>",NOW.date()),{})

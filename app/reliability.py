@@ -25,7 +25,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.7.10"
+VERSION = "0.7.11"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -1239,7 +1239,7 @@ def odds_available_menu(available: dict[str, int], probe: dict | None = None) ->
                          "type": "uri", "label": "🔎 台彩官網賽事表",
                          "uri": "https://www.sportslottery.com.tw/sportsbook/daily-coupons"}})
     else:
-        rows.append(text("僅列已取得的實際台彩賠率；截圖與每日快照不是即時報價。",
+        rows.append(text("部分賠率為第三方公開紀錄，非台彩官網即時核實；請以官方實際盤口為準。",
                          "xs", "#CBD5E1"))
     rows.append(button("↩ 返回台彩賠率分類", "台灣運彩賠率", "#334155"))
     return {"type": "flex",
