@@ -633,6 +633,40 @@ async def continuous_refresh(app):
         await asyncio.sleep(300)
 
 
+async def check_platform_quota_once(app):
+    """Read account credit balance via free The Odds API /sports endpoint.
+
+    Never emit API keys, response bodies, URLs with credentials, or exception
+    strings in logs. This is diagnostic only: no odds are purchased.
+    """
+    key = (os.getenv("ODDS_API_KEY") or
+           os.getenv("THE_ODDS_API_KEY") or "").strip()
+    if not key:
+        log.warning("the_odds_quota configured=no remaining=unknown used=unknown")
+        return {"configured": False, "remaining": None, "used": None}
+
+    try:
+        response = await app.state.controller.odds.client.get(
+            "https://api.the-odds-api.com/v4/sports/",
+            headers={"x-api-key": key}, timeout=8)
+        def clean_count(name):
+            raw = response.headers.get(name, "")
+            return int(raw) if raw.isdecimal() else None
+        balance = clean_count("x-requests-remaining")
+        used = clean_count("x-requests-used")
+        cost = clean_count("x-requests-last")
+        log.info("the_odds_quota configured=yes http_status=%s remaining=%s used=%s last=%s",
+                 response.status_code, balance if balance is not None else "unknown",
+                 used if used is not None else "unknown",
+                 cost if cost is not None else "unknown")
+        return {"configured": True, "http_status": response.status_code,
+                "remaining": balance, "used": used, "last": cost}
+    except (httpx.HTTPError, ValueError, TypeError) as exc:
+        log.warning("the_odds_quota configured=yes error_kind=%s remaining=unknown",
+                    type(exc).__name__)
+        return {"configured": True, "remaining": None, "used": None}
+
+
 @asynccontextmanager
 async def lifespan(app):
     app.state.pending = set()
@@ -659,6 +693,7 @@ async def lifespan(app):
                  bool(os.getenv("JBOT_API_TOKEN", "").strip()),
                  bool(os.getenv("JBOT_TRIAL_USER_IDS", "").strip()))
         app.state.line_client = line_client
+        platform_quota_probe = asyncio.create_task(check_platform_quota_once(app))
         probe = asyncio.create_task(startup_probe(app))
         refresher = asyncio.create_task(continuous_refresh(app))
         dated_probe = asyncio.create_task(dated_flow_probe(app))
@@ -666,6 +701,7 @@ async def lifespan(app):
         richmenu_probe = asyncio.create_task(inspect_line_rich_menu(app))
         richmenu_setup = asyncio.create_task(ui.ensure_persistent_rich_menu())
         yield
+        platform_quota_probe.cancel()
         probe.cancel()
         refresher.cancel()
         dated_probe.cancel()
@@ -677,8 +713,8 @@ async def lifespan(app):
             done, unfinished = await asyncio.wait(active, timeout=4)
             for task in unfinished:
                 task.cancel()
-        await asyncio.gather(probe, refresher, dated_probe, webhook_probe,
-                             richmenu_probe, richmenu_setup,
+        await asyncio.gather(platform_quota_probe, probe, refresher, dated_probe,
+                             webhook_probe, richmenu_probe, richmenu_setup,
                              *active, return_exceptions=True)
         await app.state.controller.close()
     # Versioned rich menu is reused on subsequent deploys; old menu retained on failure.
