@@ -1208,7 +1208,7 @@ def odds_status_card(gateway: OddsGateway) -> dict:
         text("🇹🇼 台彩參考賠率", "md", "#0F766E", "bold"),
         text(tw_note, "sm"),
         text("最近檢查：" + last_checked, "xs", "#64748B"),
-        text("第三方來源不得當成台彩官網即時報價。", "xs", "#64748B"),
+        text("第三方來源僅供參考，非即時盤口，不等同台彩官網報價。", "xs", "#64748B"),
         {"type": "separator", "margin": "sm"},
         text("🎮 娛樂平台賠率", "md", "#0F766E", "bold"),
         text(platform_note, "sm"),
