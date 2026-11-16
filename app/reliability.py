@@ -1243,20 +1243,24 @@ def odds_available_menu(available: dict[str, int], probe: dict | None = None) ->
                          "xs", "#CBD5E1"))
     rows.append(button("↩ 返回台彩賠率分類", "台灣運彩賠率", "#334155"))
     return {"type": "flex",
-            "altText": f"今日有資料的台灣運彩賠率｜{total}場",
+            "altText": (f"今日有資料的台灣運彩賠率｜{total}場" if total
+                        else "台彩賠率尚未同步｜請查看抓取狀態"),
             "quickReply": quick_menu(),
             "contents": {"type": "bubble", "size": "kilo",
                 "header": {"type": "box", "layout": "vertical",
                            "backgroundColor": "#0F172A", "paddingAll": "16px",
                            "contents": [
-                               text("🇹🇼 今日已同步的台彩盤口", "lg", "#FFFFFF", "bold"),
+                               text("🇹🇼 今日已同步的台彩盤口" if total
+                                    else "🇹🇼 台彩官網賠率抓取狀態",
+                                    "lg", "#FFFFFF", "bold"),
                                text(f"目前可核實 {total} 場賽事", "sm", "#CBD5E1")]},
                 "body": {"type": "box", "layout": "vertical", "spacing": "sm",
                          "paddingAll": "14px", "contents": rows}}}
 
 
 def odds_league_menu(provider: str, sport: str | None = None,
-                     available: dict[str, int] | None = None) -> dict:
+                     available: dict[str, int] | None = None,
+                     probe: dict | None = None) -> dict:
     """Odds navigation: source -> sport -> league, with verified-data status."""
     prefix = "台灣運彩" if provider == "台灣運彩賠率" else "娛樂平台"
     groups = ODDS_GROUPS[prefix]
@@ -1278,8 +1282,11 @@ def odds_league_menu(provider: str, sport: str | None = None,
                 label += f"｜{count} 場已更新" if count else "｜尚未取得賠率"
             actions.append(button(label, "賠率分類" + prefix + category,
                                   ODDS_COLORS[category]))
-        description = ("有資料的賽事可直接查看；其餘聯賽仍保留，但不會顯示假賠率。"
-                       if is_tw else "先選擇球類，再查看聯賽與賽事")
+        description = (
+            ("台彩官網目前拒絕自動讀取（HTTP 403），請點「立即抓取」查看最近檢查結果。"
+             if (probe or {}).get("status") == "http_403"
+             else "有資料的賽事可直接查看；缺資料時按「立即抓取」重新檢查。")
+            if is_tw else "先選擇球類，再查看聯賽與賽事")
         title = provider + "｜球類分類"
         actions.append(button("↩ 返回賠率來源", "檢視賠率", "#334155"))
     else:
@@ -2214,7 +2221,8 @@ class Controller:
                 await self.odds.check_tw_public_now()
             available = (odds_today_available(self.odds)
                          if compact == "台灣運彩賠率" else None)
-            return [odds_league_menu(compact, available=available)]
+            return [odds_league_menu(
+                compact, available=available, probe=self.odds.tw_probe)]
         if compact == "台彩立即更新":
             await self.odds.check_tw_public_now()
             return [odds_available_menu(
@@ -2228,7 +2236,9 @@ class Controller:
             source, sport = odds_sport.groups()
             available = (odds_today_available(self.odds)
                          if source == "台灣運彩" else None)
-            return [odds_league_menu(source + "賠率", sport, available)]
+            return [odds_league_menu(
+                source + "賠率", sport, available,
+                self.odds.tw_probe if source == "台灣運彩" else None)]
         odds_page = re.fullmatch(
             r"賠率頁(台灣運彩|娛樂平台)(足球|英超|西甲|德甲|義甲|法甲|歐冠|NBA|NCAA|NBL|TPBL|MLB|NPB|KBO|CPBL|MiLB)#([0-9]{1,2})",
             compact)

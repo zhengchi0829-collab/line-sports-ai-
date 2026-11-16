@@ -3,7 +3,7 @@ import unittest
 from datetime import datetime
 import httpx
 from app.odds import OddsGateway, TZ
-from app.reliability import odds_available_menu
+from app.reliability import odds_available_menu, odds_league_menu
 
 NOW = datetime(2026, 11, 16, 16, 30, tzinfo=TZ)
 PAGE = """<table><tr><th>日期</th><th>時間</th><th>運動</th><th>客隊</th>
@@ -37,6 +37,14 @@ class TaiwanOnDemandTests(unittest.IsolatedAsyncioTestCase):
                                  ensure_ascii=False)
             self.assertIn("HTTP 403", display)
             self.assertIn("台彩立即更新", display)
+
+    async def test_empty_menu_shows_actual_403_reason(self):
+        card = json.dumps(odds_league_menu(
+            "台灣運彩賠率", available={},
+            probe={"status": "http_403"}), ensure_ascii=False)
+        self.assertIn("HTTP 403", card)
+        self.assertIn("台彩立即更新", card)
+        self.assertNotIn("尚無快照", card)
 
     async def test_unstructured_page_never_generates_prices(self):
         async with httpx.AsyncClient(transport=httpx.MockTransport(
