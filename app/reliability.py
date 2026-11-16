@@ -25,7 +25,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.7.9"
+VERSION = "0.7.10"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -1218,7 +1218,7 @@ def odds_today_available(gateway: OddsGateway) -> dict[str, int]:
             for league in leagues}
 
 
-def odds_available_menu(available: dict[str, int]) -> dict:
+def odds_available_menu(available: dict[str, int], probe: dict | None = None) -> dict:
     """Direct entry to events with actual verified Taiwan odds today."""
     total = sum(available.values())
     rows = [
@@ -1227,9 +1227,17 @@ def odds_available_menu(available: dict[str, int]) -> dict:
         for league, count in available.items() if count
     ]
     if not rows:
-        rows.append(text("今日尚未有已核實的台灣運彩盤口快照。"
-                         "定時檢查不代表一定能取得官網資料；沒有盤口不產生分析。",
-                         "sm", "#CBD5E1"))
+        error = (probe or {}).get("status", "not_checked")
+        when = (probe or {}).get("at", "尚未檢查")
+        message = ("台彩官網拒絕自動讀取（HTTP 403）" if error == "http_403"
+                   else "官網可讀取，但無法核對賠率" if error == "no_verified_prices"
+                   else "來源回報：" + error)
+        rows.append(text(message + "｜檢查：" + when, "sm", "#FCA5A5"))
+        rows.append(button("🔄 立即抓取台彩賠率", "台彩立即更新", "#0F766E"))
+        rows.append({"type": "button", "style": "primary", "height": "sm",
+                     "color": "#2563EB", "action": {
+                         "type": "uri", "label": "🔎 台彩官網賽事表",
+                         "uri": "https://www.sportslottery.com.tw/sportsbook/daily-coupons"}})
     else:
         rows.append(text("僅列已取得的實際台彩賠率；截圖與每日快照不是即時報價。",
                          "xs", "#CBD5E1"))
@@ -1260,13 +1268,14 @@ def odds_league_menu(provider: str, sport: str | None = None,
         if is_tw:
             actions.append(button(
                 f"✅ 今日有資料｜{total} 場（點此查看）" if total
-                else "📭 今日暫無已核實的台彩賠率",
-                "台彩已更新", "#0F766E" if total else "#334155"))
+                else "🔄 立即抓取台彩賠率",
+                "台彩已更新" if total else "台彩立即更新",
+                "#0F766E"))
         for category in ("足球", "籃球", "棒球"):
             count = sum(counts.get(league, 0) for league in groups[category])
             label = ODDS_EMOJIS[category] + " " + category + "賽事"
             if is_tw:
-                label += f"｜{count} 場已更新" if count else "｜尚無快照"
+                label += f"｜{count} 場已更新" if count else "｜尚未取得賠率"
             actions.append(button(label, "賠率分類" + prefix + category,
                                   ODDS_COLORS[category]))
         description = ("有資料的賽事可直接查看；其餘聯賽仍保留，但不會顯示假賠率。"
@@ -1284,7 +1293,7 @@ def odds_league_menu(provider: str, sport: str | None = None,
             if is_tw:
                 count = counts.get(league, 0)
                 label = (f"✅ {league}｜已更新 {count} 場" if count
-                         else f"◻ {league}｜尚無快照")
+                         else f"◻ {league}｜尚未取得賠率")
                 color = ODDS_COLORS[sport] if count else "#334155"
             else:
                 label = "📈 " + league
@@ -1318,6 +1327,8 @@ def odds_missing_snapshot_card(league: str, available: dict[str, int]) -> dict:
                    + " 官網存取受限時不會產生模擬盤口。")
     card = empty_state_card("台灣運彩｜" + league, explanation,
                             category="賠率", back="台灣運彩賠率")
+    card["contents"]["footer"]["contents"].insert(
+        0, button("🔄 立即抓取台彩", "台彩立即更新", "#0F766E"))
     if ready:
         card["contents"]["footer"]["contents"].insert(
             -1, button(f"✅ 查看今日已更新 {sum(available.values())} 場",
@@ -2198,11 +2209,19 @@ class Controller:
         if compact == "賽事分析":
             return [date_category_menu(TODAY)]
         if compact in ("台灣運彩賠率", "娛樂平台賠率"):
+            if compact == "台灣運彩賠率" and not sum(
+                    odds_today_available(self.odds).values()):
+                await self.odds.check_tw_public_now()
             available = (odds_today_available(self.odds)
                          if compact == "台灣運彩賠率" else None)
             return [odds_league_menu(compact, available=available)]
+        if compact == "台彩立即更新":
+            await self.odds.check_tw_public_now()
+            return [odds_available_menu(
+                odds_today_available(self.odds), self.odds.tw_probe)]
         if compact == "台彩已更新":
-            return [odds_available_menu(odds_today_available(self.odds))]
+            return [odds_available_menu(
+                odds_today_available(self.odds), self.odds.tw_probe)]
         odds_sport = re.fullmatch(
             r"賠率分類(台灣運彩|娛樂平台)(足球|籃球|棒球)", compact)
         if odds_sport:
@@ -2273,6 +2292,9 @@ class Controller:
             if provider == "tw":
                 today = datetime.now(TZ).strftime("%Y-%m-%d")
                 official = self.odds.official_daily_rows(league_name, today)
+                if not official:
+                    await self.odds.check_tw_public_now()
+                    official = self.odds.official_daily_rows(league_name, today)
                 if official:
                     return [odds_fixture_picker(
                         "tw", league_name, official,

@@ -5,6 +5,10 @@ import json
 import os
 import re
 import time
+import logging
+from scripts.update_tw_official_odds import parse_public_html, URL as TW_PUBLIC_URL
+
+log = logging.getLogger("sports_bot")
 from pathlib import Path
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
@@ -389,6 +393,10 @@ class OddsGateway:
         self.daily = self._read_daily()
         self.public_blob_cache = {}
         self.official_snapshot_file = Path(__file__).resolve().parent / "tw_official_odds.json"
+        self.tw_live = {}
+        self.tw_probe = {}
+        self.tw_last_request = 0.0
+        self.tw_probe_lock = asyncio.Lock()
         # Free JBot trial is shared across ALL developers. Only manual requests;
         # durable-on-instance daily cache avoids spending on repeated taps.
         self.jbot_trial_file = Path(os.getenv("JBOT_TRIAL_CACHE_PATH", "/tmp/line_sports_jbot_trial.json"))
@@ -654,6 +662,50 @@ class OddsGateway:
             self.cache[("tw", league, date)] = (time.monotonic(), matching)
             return matching
 
+    async def check_tw_public_now(self, now=None):
+        """One bounded public GET shared across LINE users; never bypass 403."""
+        now = now or datetime.now(TZ)
+        day = now.strftime("%Y-%m-%d")
+        async with self.tw_probe_lock:
+            if (self.tw_probe.get("day") == day and self.tw_last_request
+                    and time.monotonic() - self.tw_last_request < 1800):
+                return self.tw_probe
+            self.tw_last_request = time.monotonic()
+            status = {"day": day, "at": now.strftime("%Y-%m-%d %H:%M"),
+                      "status": "unavailable", "count": 0}
+            try:
+                resp = await self.client.get(
+                    TW_PUBLIC_URL, headers={"Accept": "text/html"}, timeout=7.0)
+                if resp.status_code != 200:
+                    status["status"] = "http_" + str(resp.status_code)
+                elif resp.url.host not in ("www.sportslottery.com.tw",
+                                           "sportslottery.com.tw"):
+                    status["status"] = "bad_redirect"
+                elif "html" not in resp.headers.get("content-type", "").lower():
+                    status["status"] = "not_html"
+                elif len(resp.content) > 2_000_000:
+                    status["status"] = "too_large"
+                else:
+                    leagues = parse_public_html(resp.text, now.date())
+                    total = sum(len(x) for x in leagues.values())
+                    if total:
+                        self.tw_live = {
+                            "day": day, "captured_at": now.isoformat(),
+                            "source_url": TW_PUBLIC_URL,
+                            "capture_method": "official_public_html",
+                            "leagues": leagues}
+                        status.update(status="ok", count=total)
+                    else:
+                        status["status"] = "no_verified_prices"
+            except (httpx.HTTPError, TimeoutError) as exc:
+                status["status"] = "network_" + type(exc).__name__
+            except (ValueError, KeyError, TypeError) as exc:
+                status["status"] = "parse_" + type(exc).__name__
+            self.tw_probe = status
+            log.warning("tw_odds_on_demand status=%s count=%s checked=%s",
+                        status["status"], status["count"], status["at"])
+            return status
+
     def official_daily_rows(self, league, day):
         """Read a verified, date-stamped sportslottery.com.tw odds snapshot.
 
@@ -662,7 +714,9 @@ class OddsGateway:
         must never be presented as real quotes.
         """
         try:
-            record = json.loads(self.official_snapshot_file.read_text(encoding="utf-8"))
+            record = (self.tw_live if self.tw_live.get("day") == day and
+                      league in self.tw_live.get("leagues", {}) else
+                      json.loads(self.official_snapshot_file.read_text(encoding="utf-8")))
             if not isinstance(record, dict) or record.get("day") != day:
                 return []
             if record.get("source_url") != (
