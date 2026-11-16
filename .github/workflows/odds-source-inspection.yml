@@ -1,0 +1,17 @@
+name: One-time public Taiwan odds source inspection
+on:
+  push:
+    paths:
+      - ".github/workflows/odds-source-inspection.yml"
+      - "scripts/probe_public_odds.py"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect public source and robots policy
+        run: python3 scripts/probe_public_odds.py
