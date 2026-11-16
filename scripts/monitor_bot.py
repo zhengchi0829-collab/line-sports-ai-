@@ -9,6 +9,9 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
+
+TZ = ZoneInfo("Asia/Taipei")
 from urllib.request import Request, urlopen
 
 BASE = "https://line-sports-ai-bot.onrender.com"
@@ -82,6 +85,33 @@ def check(base):
     if (webhook.get("status") == "checking" and
             isinstance(started, (int, float)) and age - started > 300):
         raise MonitorError("webhook_external", "LINE webhook validation timed out")
+    if (features.get("line_message_validation") not in (None, 200)
+            and isinstance(started, (int, float)) and age - started > 300):
+        raise MonitorError("line_validation_invalid",
+                           "LINE message validation returned non-200")
+    # Only check the new slots when the running bot advertises that schedule.
+    current_slot = refresh.get("last_fixture_slot")
+    if current_slot is not None:
+        now = datetime.now(TZ)
+        passed = [(hour, minute) for hour, minute in ((9, 0), (15, 0), (20, 0))
+                  if (now.hour, now.minute) >= (hour, minute)]
+        if passed:
+            hour, minute = passed[-1]
+            expected = now.replace(hour=hour, minute=minute,
+                                   second=0, microsecond=0)
+            if ((now - expected).total_seconds() >= 40 * 60
+                    and current_slot != expected.isoformat()):
+                raise MonitorError("analysis_update_missed",
+                                   "Analysis schedule not completed: " +
+                                   expected.isoformat())
+    # Platform quota/bad key needs an incident, NOT repeated billed retries.
+    platform = features.get("platform_odds") or {}
+    if platform.get("status") in {"catalog_error", "missing_key"}:
+        now = datetime.now(TZ)
+        if now.hour >= 1 and platform.get("day") == now.date().isoformat():
+            raise MonitorError("platform_update_failed",
+                               "Daily platform odds update: " +
+                               str(platform.get("status")))
     richmenu = features.get("richmenu") or {}
     if richmenu.get("action_count") == 0:
         raise MonitorError("richmenu_missing", "LINE rich menu has no actions", True)

@@ -768,8 +768,23 @@ async def health():
 @app.get("/health/features")
 async def feature_health():
     ctl = app.state.controller
+    platform = ctl.odds.daily
     return {"version": VERSION, "bot_started_epoch": app.state.bot_started_epoch,
             "line_message_validation": app.state.line_validation,
+            "platform_odds": {
+                "day": platform.get("day"),
+                "status": platform.get("state", "not_attempted"),
+                "attempted_leagues": len(platform.get("attempted_leagues", [])),
+                "deferred_leagues": len(platform.get("deferred_leagues", [])),
+                "schedule_taipei": "00:30",
+            },
+            "taiwan_odds": {
+                "source": "verified_official_or_labeled_third_party",
+                "remote_status": ctl.odds.tw_remote_status.get("status", "not_checked"),
+                "last_remote_day": ctl.odds.tw_remote.get("day"),
+                "last_checked_at": ctl.odds.tw_remote_status.get("checked_at"),
+                "schedule_taipei": "hourly",
+            },
             "providers": {sport: {"cached_games": len(item[1].games),
                          "updated": item[1].fetched.isoformat() if item[1].fetched else None}
                           for sport, item in ctl.fixtures.cache.items()},

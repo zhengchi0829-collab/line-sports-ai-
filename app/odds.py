@@ -763,7 +763,7 @@ class OddsGateway:
                             or data.get("capture_method") != "third_party_playsport"
                             or data.get("source_url") != source_url or stamp is None):
                         state["status"] = "invalid_source"
-                    elif not timedelta(minutes=-5) <= now - stamp <= timedelta(minutes=40):
+                    elif not timedelta(minutes=-5) <= now - stamp <= timedelta(minutes=90):
                         state["status"] = "stale_snapshot"
                     else:
                         raw_leagues = data.get("leagues")

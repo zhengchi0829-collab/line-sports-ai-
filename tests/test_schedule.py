@@ -40,3 +40,17 @@ class ScheduleTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WorkflowCronTests(unittest.TestCase):
+    def test_schedule_matches_all_four_requested_frequencies(self):
+        from pathlib import Path
+        path = Path(__file__).resolve().parents[1] / ".github" / "workflows"
+        monitor = (path / "line-bot-monitor.yml").read_text(encoding="utf-8")
+        odds = (path / "tw-odds-10min.yml").read_text(encoding="utf-8")
+        legacy = (path / "taiwan-odds-update.yml").read_text(encoding="utf-8")
+        self.assertIn('cron: "7,17,27,37,47,57 * * * *"', monitor)
+        self.assertIn('cron: "30 16 * * *"', monitor)
+        self.assertIn('cron: "0 1,7,12 * * *"', monitor)
+        self.assertIn('cron: "0 * * * *"', odds)
+        self.assertNotIn('cron:', legacy)
