@@ -43,12 +43,18 @@ class UI:
             'body': {'type': 'box', 'layout': 'vertical', 'contents': [{'type': 'text', 'text': 'menu'}]}}}
 
     @staticmethod
-    def offline_analysis(sport, matchup, history=None, players=None):
+    def offline_analysis(sport, matchup, history=None, players=None, **kwargs):
         return {'type': 'flex', 'altText': matchup, 'contents': {'type': 'bubble',
-            'header': {'type': 'box', 'layout': 'vertical', 'contents': []},
+            'header': {'type': 'box', 'layout': 'vertical', 'contents': [
+                {'type': 'text', 'text': sport},
+                {'type': 'text', 'text': matchup}]},
             'body': {'type': 'box', 'layout': 'vertical', 'contents': [
-                {'type': 'text', 'text': sport}, {'type': 'text', 'text': history or 'no verified history'},
-                {'type': 'text', 'text': players or 'no verified roster'}]}}}
+                {'type': 'text', 'text': history or 'no verified history'},
+                {'type': 'text', 'text': players or 'no verified roster'},
+                {'type': 'box', 'layout': 'vertical', 'contents': []}]},
+            'footer': {'type': 'box', 'layout': 'vertical', 'contents': [
+                {'type': 'button', 'action': {'type': 'message', 'label': 'Other',
+                                               'text': '足球'}}]}}}
 
     winner_team_details = AsyncMock(return_value=(None, None))
 
@@ -105,9 +111,10 @@ class ParserTests(unittest.TestCase):
             parse_feed('nba_today', {})
         self.assertEqual(parse_feed('nba_today', {'scoreboard': {'games': []}}), [])
 
-    def test_today_uses_next_available_not_only_day_1_or_7(self):
+    def test_today_never_includes_future_dates(self):
         games = [Game('1', 'soccer', 'L', NOW + timedelta(days=3), 'H', 'A')]
-        self.assertEqual(select_games(games, NOW, True), games)
+        self.assertEqual(select_games(games, NOW, today=True), [])
+        self.assertEqual(select_games(games, NOW, future=True), games)
 
     def test_past_fixture_not_promoted_to_future(self):
         g = Game('1', 'soccer', 'L', NOW - timedelta(days=1), 'H', 'A')
@@ -117,13 +124,13 @@ class ParserTests(unittest.TestCase):
         g = Game('1', 'basketball', 'NBA', NOW + timedelta(days=1), 'Home', 'Away')
         card = fixture_cards('basketball', Snapshot([g], NOW), str, now=NOW)
         self.assertEqual(card['contents']['contents'][0]['footer']['contents'][0]['action']['text'],
-                         '\u5206\u6790' + BASKETBALL + ' Home vs Away')
+                         '分析NBA 2026-11-13 Home vs Away')
         self.assertIn('quickReply', card)
 
     def test_error_notice_never_claims_no_matches(self):
         card = json.dumps(notice('basketball', Snapshot(errors=['403'])), ensure_ascii=False)
-        self.assertIn('\u4e26\u4e0d\u4ee3\u8868\u6c92\u6709\u6bd4\u8cfd', card)
-        self.assertIn('\u6a21\u64ec\u5c0d\u6230\u5206\u6790', card)
+        self.assertIn('賽程資料來源暫時沒有回應', card)
+        self.assertIn('重新查詢', card)
 
 
 class AsyncTests(unittest.IsolatedAsyncioTestCase):
@@ -238,13 +245,14 @@ class AsyncTests(unittest.IsolatedAsyncioTestCase):
                 return Snapshot()
             ctl.fixtures.get = fake_get
             messages = await ctl.reply('\u4eca\u65e5\u8cfd\u4e8b')
-            self.assertEqual(len(messages), 3)
-            self.assertTrue(all(m['type'] == 'flex' for m in messages))
+            self.assertEqual(len(messages), 1)
+            self.assertEqual(messages[0]['type'], 'flex')
+            self.assertIn('今日', json.dumps(messages, ensure_ascii=False))
 
     async def test_analysis_parsing_works(self):
         async with httpx.AsyncClient() as client:
             ctl = Controller(UI, client)
-            ctl.team_details = AsyncMock(return_value=('History', 'Roster'))
+            ctl.team_details = AsyncMock(return_value=('History', 'Roster', None, None))
             cards = await ctl.reply('\u5206\u6790' + SOCCER + ' A vs B')
             self.assertEqual(cards[0]['altText'], 'A vs B')
             self.assertIn('History', json.dumps(cards))
@@ -325,7 +333,7 @@ class WebhookTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_webhook_ack_does_not_wait_for_data(self):
         gate = asyncio.Event()
-        async def blocked(raw):
+        async def blocked(raw, user_id=None):
             await gate.wait()
             return [{'type': 'text', 'text': 'done'}]
         self.main.app.state.controller.reply = blocked
