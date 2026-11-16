@@ -1,0 +1,52 @@
+name: Taiwan Odds - every 10 minutes (no redeploy)
+
+on:
+  schedule:
+    # UTC every 10 minutes, offset away from GitHub's busiest minute 0.
+    - cron: "4,14,24,34,44,54 * * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/tw-odds-10min.yml"
+      - "scripts/tw_playsport_fallback.py"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: taiwan-odds-10min-feed
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read current public source and validate real Taiwan odds
+        run: |
+          python3 -m scripts.tw_playsport_fallback \
+            --out "$RUNNER_TEMP/tw_third_party_odds.json" \
+            --status "$RUNNER_TEMP/tw_10min_status.json"
+      - name: Update independent odds-data branch without restarting Render
+        run: |
+          set -eu
+          cp "$RUNNER_TEMP/tw_third_party_odds.json" "$RUNNER_TEMP/latest-odds.json"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --heads origin odds-cache >/dev/null 2>&1; then
+            git fetch --no-tags origin odds-cache
+            git checkout -B odds-cache FETCH_HEAD
+          else
+            git checkout --orphan odds-cache
+            git rm -rf --cached . >/dev/null 2>&1 || true
+          fi
+          cp "$RUNNER_TEMP/latest-odds.json" tw_third_party_odds.json
+          git add -f tw_third_party_odds.json
+          if git diff --cached --quiet; then
+            echo "Odds checked; snapshot unchanged"
+          else
+            git commit -m "Update published Taiwan odds reference (10-minute check)"
+            git push origin HEAD:refs/heads/odds-cache
+          fi
