@@ -43,6 +43,8 @@ class RemoteOddsTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(displayed[0]["away_price"], 3.95)
             self.assertIn("第三方", displayed[0]["source"])
             self.assertEqual(len(calls), 1)
+            self.assertIn("check=", calls[0])
+            self.assertEqual(state["source_captured_at"], NOW.isoformat())
             await gateway.refresh_remote_reference(NOW)
             self.assertEqual(len(calls), 1)
 

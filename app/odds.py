@@ -729,7 +729,7 @@ class OddsGateway:
             return matching
 
     async def refresh_remote_reference(self, now=None):
-        """Read the latest 10-minute data branch without restarting Render.
+        """Read the latest hourly data branch without restarting Render.
 
         GitHub Actions writes this publicly accessible JSON into odds-cache.
         Never trust it without date/source/time/event and price checks.
@@ -747,6 +747,10 @@ class OddsGateway:
             try:
                 response = await self.client.get(
                     TW_CACHE_URL,
+                    # A new hourly odds-cache commit may still be hidden behind
+                    # GitHub raw CDN's earlier cached response. A short-lived
+                    # cache-busting key asks for the newest published snapshot.
+                    params={"check": str(int(now.timestamp() // 300))},
                     headers={"Accept": "application/json", "Cache-Control": "no-cache"},
                     timeout=4.0)
                 if response.status_code != 200:
@@ -756,6 +760,7 @@ class OddsGateway:
                 else:
                     data = response.json()
                     stamp = parse_time(data.get("captured_at")) if isinstance(data, dict) else None
+                    state["source_captured_at"] = stamp.isoformat() if stamp else None
                     source_url = (
                         "https://www.playsport.cc/gamesData/result?"
                         "allianceid=4&gametime=" + day.replace("-", ""))
@@ -788,8 +793,9 @@ class OddsGateway:
             except (ValueError, KeyError, TypeError) as exc:
                 state["status"] = "invalid_" + type(exc).__name__
             self.tw_remote_status = state
-            log.info("tw_odds_remote_cache status=%s count=%s day=%s",
-                     state["status"], state["count"], day)
+            log.info("tw_odds_remote_cache status=%s count=%s day=%s source_at=%s",
+                     state["status"], state["count"], day,
+                     state.get("source_captured_at") or "unknown")
             return state
 
     async def check_tw_public_now(self, now=None):
