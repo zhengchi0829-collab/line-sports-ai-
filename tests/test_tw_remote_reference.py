@@ -1,4 +1,4 @@
-"""Ten-minute external odds cache changes LINE data without changing source code."""
+"""Hourly external odds cache changes LINE data without changing source code."""
 import json
 import unittest
 from datetime import datetime, timedelta
@@ -32,6 +32,9 @@ class RemoteOddsTests(unittest.IsolatedAsyncioTestCase):
             return httpx.Response(200, json=fixture())
         async with httpx.AsyncClient(transport=httpx.MockTransport(serve)) as client:
             gateway = OddsGateway(client)
+            # Synthetic snapshots must not compete with live published odds.
+            gateway.official_snapshot_file = __import__("pathlib").Path("/tmp/test_nonexistent_official_58249.json")
+            gateway.third_party_snapshot_file = __import__("pathlib").Path("/tmp/test_nonexistent_third_58249.json")
             state = await gateway.refresh_remote_reference(NOW)
             self.assertEqual(state["status"], "ok")
             self.assertEqual(state["count"], 1)
