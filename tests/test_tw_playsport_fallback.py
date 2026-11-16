@@ -36,6 +36,12 @@ class PlaySportTests(unittest.TestCase):
         self.assertEqual(game["total"], 2.5)
         self.assertEqual((game["over_price"], game["under_price"]), (2, 1.48))
 
+    def test_real_site_repeats_gameid_across_three_rows(self):
+        repeated = HTML.replace(
+            '<tr><td class="td-teaminfo">',
+            '<tr gameid="2026111641047"><td class="td-teaminfo">')
+        self.assertEqual(len(parse_football(repeated, NOW.date(), cutoff=NOW)["足球"]), 1)
+
     def test_completed_game_is_not_reported(self):
         self.assertEqual(parse_football(
             HTML, NOW.date(), cutoff=datetime(2026, 11, 16, 23, 30, tzinfo=TZ)), {})

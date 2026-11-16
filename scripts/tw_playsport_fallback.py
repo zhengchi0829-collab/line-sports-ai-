@@ -73,17 +73,22 @@ class TableRows(HTMLParser):
 
 
 def groups(rows):
+    """One published fixture can repeat its gameid on all three market rows."""
     current = []
     for row in rows:
-        if row["id"]:
+        if "gaprow" in row["class"]:
             if current:
                 yield current
-            current = [row]
-        elif current and "gaprow" not in row["class"]:
-            current.append(row)
-        elif current:
-            yield current
             current = []
+        elif row["id"]:
+            if current and current[0]["id"] == row["id"]:
+                current.append(row)
+            else:
+                if current:
+                    yield current
+                current = [row]
+        elif current:
+            current.append(row)
     if current:
         yield current
 
