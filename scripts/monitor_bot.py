@@ -85,10 +85,11 @@ def check(base):
     if (webhook.get("status") == "checking" and
             isinstance(started, (int, float)) and age - started > 300):
         raise MonitorError("webhook_external", "LINE webhook validation timed out")
-    if (features.get("line_message_validation") not in (None, 200)
-            and isinstance(started, (int, float)) and age - started > 300):
-        raise MonitorError("line_validation_invalid",
-                           "LINE message validation returned non-200")
+    if isinstance(started, (int, float)) and age - started > 300:
+        validation = features.get("line_message_validation")
+        if validation != 200:
+            raise MonitorError("line_validation_invalid",
+                               "LINE message validation missing or non-200")
     # Only check the new slots when the running bot advertises that schedule.
     current_slot = refresh.get("last_fixture_slot")
     if current_slot is not None:
@@ -99,11 +100,15 @@ def check(base):
             hour, minute = passed[-1]
             expected = now.replace(hour=hour, minute=minute,
                                    second=0, microsecond=0)
-            if ((now - expected).total_seconds() >= 40 * 60
-                    and current_slot != expected.isoformat()):
-                raise MonitorError("analysis_update_missed",
-                                   "Analysis schedule not completed: " +
-                                   expected.isoformat())
+            if (now - expected).total_seconds() >= 40 * 60:
+                last_completed = refresh.get("last_fixture_refresh_epoch")
+                if (current_slot != expected.isoformat() or
+                        not isinstance(last_completed, (int, float)) or
+                        last_completed < expected.timestamp()):
+                    raise MonitorError(
+                        "analysis_update_missed",
+                        "Analysis scheduled slot did not complete: " +
+                        expected.isoformat())
     # Platform quota/bad key needs an incident, NOT repeated billed retries.
     platform = features.get("platform_odds") or {}
     if platform.get("status") in {"catalog_error", "missing_key"}:

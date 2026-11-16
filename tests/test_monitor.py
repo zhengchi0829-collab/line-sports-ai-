@@ -91,6 +91,33 @@ class MonitorTests(unittest.TestCase):
             self.assertIn("upstream_failed", report.read_text())
 
 
+
+    def test_fixture_slot_marked_but_unfinished_is_reported(self):
+        from datetime import datetime
+        from scripts.monitor_bot import TZ
+        health, features = self.payloads()
+        when = datetime(2026, 11, 16, 21, 1, tzinfo=TZ)
+        features["background_refresh"]["last_fixture_slot"] = "2026-11-16T20:00:00+08:00"
+        features["background_refresh"]["last_fixture_refresh_epoch"] = None
+        with patch.object(monitor_bot, "datetime") as clock:
+            clock.now.return_value = when
+            with self.assertRaises(monitor_bot.MonitorError) as failure:
+                self.check_payloads(health, features)
+        self.assertEqual(failure.exception.code, "analysis_update_missed")
+        self.assertFalse(failure.exception.restartable)
+        features["background_refresh"]["last_fixture_refresh_epoch"] = when.timestamp()
+        with patch.object(monitor_bot, "datetime") as clock:
+            clock.now.return_value = when
+            self.assertIn("OK", self.check_payloads(health, features))
+
+    def test_line_schema_validation_failure_is_reported(self):
+        health, features = self.payloads()
+        features["bot_started_epoch"] -= 400
+        features["line_message_validation"] = 400
+        with self.assertRaises(monitor_bot.MonitorError) as failure:
+            self.check_payloads(health, features)
+        self.assertEqual(failure.exception.code, "line_validation_invalid")
+
 class RecoveryPolicyTests(unittest.TestCase):
     def test_not_restartable(self):
         allowed, _ = auto_recover_bot.policy(
