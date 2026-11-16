@@ -15,7 +15,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: taiwan-odds-10min-feed
+  group: taiwan-odds-hourly-feed
   cancel-in-progress: false
 
 jobs:
@@ -24,11 +24,11 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      - name: Read current public source and validate real Taiwan odds
+      - name: Read third-party public sports-odds reference and validate source
         run: |
           python3 -m scripts.tw_playsport_fallback \
             --out "$RUNNER_TEMP/tw_third_party_odds.json" \
-            --status "$RUNNER_TEMP/tw_10min_status.json"
+            --status "$RUNNER_TEMP/tw_hourly_status.json"
       - name: Update independent odds-data branch without restarting Render
         run: |
           set -eu

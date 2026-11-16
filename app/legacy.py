@@ -860,6 +860,19 @@ async def reply_for(text):
         return "【會員中心】\n目前賽事查詢與公開數據分析免費使用。\n尚未開放註冊、登入、付費或訂閱。"
     return MENU
 
+# Live LINE six-grid menu: keep sports, fixtures and odds only.
+# All other navigation, including future fixtures and Home, remains available
+# through the Flex main menu and quick replies.
+RICH_MENU_ACTIONS = (
+    ("足球", "足球", "01 / FOOTBALL"),
+    ("籃球", "籃球", "02 / BASKETBALL"),
+    ("棒球", "棒球", "03 / BASEBALL"),
+    ("今日賽事", "今日賽事", "04 / TODAY"),
+    ("未來賽事", "未來賽事", "05 / UPCOMING"),
+    ("賠率分析", "檢視賠率", "06 / ODDS"),
+)
+
+
 async def ensure_persistent_rich_menu():
     """Create the six-button sci-fi LINE rich menu once, then set as default.
 
@@ -874,14 +887,13 @@ async def ensure_persistent_rich_menu():
     from PIL import Image, ImageDraw, ImageFont
     from fastapi.concurrency import run_in_threadpool
 
-    menu_name = "Sports AI Sci-Fi Rich Menu v1"
+    menu_name = "Sports AI Sci-Fi Rich Menu v2 Sports Odds"
     width, height = 2500, 843
     col_edges = (0, 833, 1667, 2500)
     row_edges = (0, 421, 843)
-    labels = ["足球", "籃球", "棒球", "今日賽事", "未來賽事", "主選單"]
-    commands = ["足球", "籃球", "棒球", "今日賽事", "未來賽事", "選單"]
-    symbols = ["01 / FOOTBALL", "02 / BASKETBALL", "03 / BASEBALL",
-               "04 / TODAY", "05 / UPCOMING", "06 / HOME"]
+    labels = [label for label, _, _ in RICH_MENU_ACTIONS]
+    commands = [command for _, command, _ in RICH_MENU_ACTIONS]
+    symbols = [symbol for _, _, symbol in RICH_MENU_ACTIONS]
     accent_colors = ("#21D4CA", "#38BDF8", "#A78BFA",
                      "#2DD4BF", "#60A5FA", "#94A3B8")
 

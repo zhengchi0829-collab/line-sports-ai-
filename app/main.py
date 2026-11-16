@@ -30,7 +30,7 @@ from .reliability import (Controller, Game, Snapshot, SPORTS, TZ, VERSION,
                           select_games, SPECIFIED, holographic_messages,
                           odds_fixture_picker, odds_single_match_card,
                           odds_today_available, odds_available_menu,
-                          verified_form_match)
+                          odds_status_card, verified_form_match)
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
 log = logging.getLogger("sports_bot")
@@ -107,6 +107,7 @@ async def startup_probe(app):
         odds_ui = odds_category_menu()
         odds_actions = str(odds_ui)
         assert "台灣運彩賠率" in odds_actions and "娛樂平台賠率" in odds_actions
+        assert "賠率資料狀態" in odds_actions
         for provider in ("台灣運彩賠率", "娛樂平台賠率"):
             source = provider.removesuffix("賠率")
             sport_menu = odds_league_menu(provider)
@@ -183,7 +184,8 @@ async def startup_probe(app):
             log.info("line_message_validation status=%s version=%s", response.status_code, VERSION)
             new_cards = [date_category_menu("今日賽事"),
                          date_category_menu("未來賽事"),
-                         odds_category_menu(), odds_source_card("台灣運彩賠率"),
+                         odds_category_menu(), odds_status_card(app.state.controller.odds),
+                         odds_source_card("台灣運彩賠率"),
                          odds_source_card("娛樂平台賠率"),
                          odds_league_menu("台灣運彩賠率",
                                           available=today_available),
@@ -298,6 +300,19 @@ async def inspect_line_rich_menu(app):
         app.state.richmenu_check = {"action_count": len(actions), "actions": actions}
     except (httpx.HTTPError, ValueError, TypeError, KeyError) as exc:
         log.warning("line_richmenu_inspect_error kind=%s", type(exc).__name__)
+
+
+async def configure_and_verify_rich_menu(app):
+    """Publish the six sports/odds buttons before verifying the active menu."""
+    updated = await ui.ensure_persistent_rich_menu()
+    await inspect_line_rich_menu(app)
+    actions = app.state.richmenu_check.get("actions") or []
+    texts = {action.get("text") for action in actions}
+    found = "檢視賠率" in texts
+    app.state.richmenu_check["odds_entry_ready"] = found
+    log.info("line_richmenu_odds_entry configured=%s present=%s", updated, found)
+    if not found:
+        log.warning("line_richmenu_odds_entry missing_after_setup")
 
 
 async def verify_line_webhook(app):
@@ -719,23 +734,21 @@ async def lifespan(app):
         refresher = asyncio.create_task(continuous_refresh(app))
         dated_probe = asyncio.create_task(dated_flow_probe(app))
         webhook_probe = asyncio.create_task(verify_line_webhook(app))
-        richmenu_probe = asyncio.create_task(inspect_line_rich_menu(app))
-        richmenu_setup = asyncio.create_task(ui.ensure_persistent_rich_menu())
+        richmenu_task = asyncio.create_task(configure_and_verify_rich_menu(app))
         yield
         platform_quota_probe.cancel()
         probe.cancel()
         refresher.cancel()
         dated_probe.cancel()
         webhook_probe.cancel()
-        richmenu_probe.cancel()
-        richmenu_setup.cancel()
+        richmenu_task.cancel()
         active = list(app.state.pending)
         if active:
             done, unfinished = await asyncio.wait(active, timeout=4)
             for task in unfinished:
                 task.cancel()
         await asyncio.gather(platform_quota_probe, probe, refresher, dated_probe,
-                             webhook_probe, richmenu_probe, richmenu_setup,
+                             webhook_probe, richmenu_task,
                              *active, return_exceptions=True)
         await app.state.controller.close()
     # Versioned rich menu is reused on subsequent deploys; old menu retained on failure.
