@@ -270,13 +270,13 @@ class IntegrationCatalog:
             log.info("integration_catalog status=%s http=%s sports_records=%s sports_vendors=%s scan_partial=%s",
                      state["status"], state.get("http_status", 200),
                      state.get("records_read", 0),
-                     state.get("vendor_count", 0), state.get("partial", False))
+                     state.get("vendor_count", 0), state.get("catalog_truncated", False))
             if state["status"] == "ok":
                 log.info("integration_sports_only vendors=%s games=%s",
                          ",".join(state.get("vendor_codes", [])),
                          " | ".join(
                              f"{row['vendor']}:{row['name']}"
-                             for row in state.get("sports_entries", [])[:20])))
+                             for row in state.get("sports_entries", [])[:20]))
             return state
 
     def line_summary(self) -> str:
