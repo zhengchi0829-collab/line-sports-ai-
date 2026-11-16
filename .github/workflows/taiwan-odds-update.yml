@@ -1,0 +1,59 @@
+name: Taiwan Sports Lottery - 09 15 20 updates
+
+on:
+  schedule:
+    # GitHub cron runs in UTC; Taiwan is UTC+8.
+    - cron: "0 1,7,12 * * *"
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/taiwan-odds-update.yml"
+      - "scripts/update_tw_official_odds.py"
+      - "scripts/tw_odds_issue.py"
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: taiwan-odds-official-sync
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch and verify public Taiwan Lottery page
+        id: fetch
+        continue-on-error: true
+        run: |
+          python3 scripts/update_tw_official_odds.py \
+            --out app/tw_official_odds.json \
+            --status "$RUNNER_TEMP/tw-odds-status.json"
+      - name: Save verified snapshot and auto-deploy to Render
+        id: push
+        if: steps.fetch.outcome == 'success'
+        continue-on-error: true
+        run: |
+          if git diff --quiet -- app/tw_official_odds.json; then
+            echo "Verified snapshot unchanged"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add app/tw_official_odds.json
+            git commit -m "Update verified Taiwan Lottery odds snapshot"
+            git push origin HEAD:main
+          fi
+      - name: Report source failures or recovery
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FETCH_OUTCOME: ${{ steps.fetch.outcome }}
+          PUSH_OUTCOME: ${{ steps.push.outcome }}
+          TW_STATUS_PATH: ${{ runner.temp }}/tw-odds-status.json
+        run: python3 scripts/tw_odds_issue.py
+      - name: Mark missing verified data as failed
+        if: steps.fetch.outcome != 'success' || steps.push.outcome != 'success'
+        run: exit 1
