@@ -10,12 +10,14 @@ from scripts.update_tw_official_odds import parse_public_html, URL as TW_PUBLIC_
 
 log = logging.getLogger("sports_bot")
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import httpx
 
 TZ = ZoneInfo("Asia/Taipei")
+TW_CACHE_URL = ("https://raw.githubusercontent.com/zhengchi0829-collab/"
+                "line-sports-ai-/odds-cache/tw_third_party_odds.json")
 KEYS = {
     "英超": "soccer_epl", "西甲": "soccer_spain_la_liga",
     "德甲": "soccer_germany_bundesliga", "義甲": "soccer_italy_serie_a",
@@ -394,6 +396,11 @@ class OddsGateway:
         self.public_blob_cache = {}
         self.official_snapshot_file = Path(__file__).resolve().parent / "tw_official_odds.json"
         self.third_party_snapshot_file = Path(__file__).resolve().parent / "tw_third_party_odds.json"
+        # Reference data is published on a separate non-deploy GitHub branch.
+        self.tw_remote = {}
+        self.tw_remote_status = {"status": "not_checked"}
+        self.tw_remote_checked = 0.0
+        self.tw_remote_lock = asyncio.Lock()
         self.tw_live = {}
         self.tw_probe = {}
         self.tw_last_request = 0.0
@@ -663,6 +670,70 @@ class OddsGateway:
             self.cache[("tw", league, date)] = (time.monotonic(), matching)
             return matching
 
+    async def refresh_remote_reference(self, now=None):
+        """Read the latest 10-minute data branch without restarting Render.
+
+        GitHub Actions writes this publicly accessible JSON into odds-cache.
+        Never trust it without date/source/time/event and price checks.
+        """
+        now = now or datetime.now(TZ)
+        day = now.strftime("%Y-%m-%d")
+        async with self.tw_remote_lock:
+            if (self.tw_remote_checked and
+                    time.monotonic() - self.tw_remote_checked < 270 and
+                    self.tw_remote_status.get("day") == day):
+                return self.tw_remote_status
+            self.tw_remote_checked = time.monotonic()
+            state = {"day": day, "checked_at": now.isoformat(),
+                     "status": "unavailable", "count": 0}
+            try:
+                response = await self.client.get(
+                    TW_CACHE_URL,
+                    headers={"Accept": "application/json", "Cache-Control": "no-cache"},
+                    timeout=4.0)
+                if response.status_code != 200:
+                    state["status"] = "http_" + str(response.status_code)
+                elif len(response.content) > 750000:
+                    state["status"] = "too_large"
+                else:
+                    data = response.json()
+                    stamp = parse_time(data.get("captured_at")) if isinstance(data, dict) else None
+                    source_url = (
+                        "https://www.playsport.cc/gamesData/result?"
+                        "allianceid=4&gametime=" + day.replace("-", ""))
+                    if (not isinstance(data, dict) or data.get("day") != day
+                            or data.get("capture_method") != "third_party_playsport"
+                            or data.get("source_url") != source_url or stamp is None):
+                        state["status"] = "invalid_source"
+                    elif not timedelta(minutes=-5) <= now - stamp <= timedelta(minutes=40):
+                        state["status"] = "stale_snapshot"
+                    else:
+                        raw_leagues = data.get("leagues")
+                        if not isinstance(raw_leagues, dict):
+                            state["status"] = "bad_rows"
+                        else:
+                            valid = {
+                                name: verified_taiwan_rows(rows, day)
+                                for name, rows in raw_leagues.items()
+                                if name in JSPORTS and isinstance(rows, list)
+                            }
+                            count = sum(map(len, valid.values()))
+                            if count:
+                                data["leagues"] = valid
+                                self.tw_remote = data
+                                state.update(status="ok", count=count,
+                                             captured_at=stamp.isoformat())
+                            else:
+                                state["status"] = "no_verified_events"
+            except (httpx.HTTPError, TimeoutError) as exc:
+                state["status"] = "network_" + type(exc).__name__
+            except (ValueError, KeyError, TypeError) as exc:
+                state["status"] = "invalid_" + type(exc).__name__
+            self.tw_remote_status = state
+            log.info("tw_odds_remote_cache status=%s count=%s day=%s",
+                     state["status"], state["count"], day)
+            return state
+
     async def check_tw_public_now(self, now=None):
         """One bounded public GET shared across LINE users; never bypass 403."""
         now = now or datetime.now(TZ)
@@ -715,36 +786,38 @@ class OddsGateway:
         must never be presented as real quotes.
         """
         try:
-            # Priority: verified public official page, official saved snapshot,
-            # then explicitly labeled public third-party references.
-            record = {}
-            if (self.tw_live.get("day") == day
-                    and league in (self.tw_live.get("leagues") or {})):
-                record = self.tw_live
-            else:
-                for path in (self.official_snapshot_file, self.third_party_snapshot_file):
-                    try:
-                        saved = json.loads(path.read_text(encoding="utf-8"))
-                    except (OSError, ValueError, TypeError):
-                        continue
-                    if (isinstance(saved, dict) and saved.get("day") == day
-                            and isinstance(saved.get("leagues"), dict)
-                            and saved["leagues"].get(league)):
-                        record = saved
-                        break
-            if not isinstance(record, dict) or record.get("day") != day:
-                return []
+            # Prefer the newest verified snapshot by capture time.
+            # Remote odds branch gets refreshed without deploying bot code.
             official_url = "https://www.sportslottery.com.tw/sportsbook/daily-coupons"
             third_url = ("https://www.playsport.cc/gamesData/result?"
                          "allianceid=4&gametime=" + day.replace("-", ""))
-            third_party = (
-                record.get("capture_method") == "third_party_playsport"
-                and record.get("source_url") == third_url)
-            if record.get("source_url") != official_url and not third_party:
+            candidates = [self.tw_live, self.tw_remote]
+            for path in (self.official_snapshot_file, self.third_party_snapshot_file):
+                try:
+                    candidates.append(json.loads(path.read_text(encoding="utf-8")))
+                except (OSError, ValueError, TypeError):
+                    continue
+            matching = []
+            for candidate in candidates:
+                if not isinstance(candidate, dict) or candidate.get("day") != day:
+                    continue
+                is_third_party = (
+                    candidate.get("capture_method") == "third_party_playsport"
+                    and candidate.get("source_url") == third_url)
+                if candidate.get("source_url") != official_url and not is_third_party:
+                    continue
+                captured = parse_time(candidate.get("captured_at"))
+                if captured is None or captured.strftime("%Y-%m-%d") != day:
+                    continue
+                leagues = candidate.get("leagues")
+                if not isinstance(leagues, dict) or not isinstance(leagues.get(league), list):
+                    continue
+                if not leagues[league]:
+                    continue
+                matching.append((captured, candidate, is_third_party))
+            if not matching:
                 return []
-            captured_at = parse_time(record.get("captured_at"))
-            if captured_at is None or captured_at.strftime("%Y-%m-%d") != day:
-                return []
+            captured_at, record, third_party = max(matching, key=lambda x: x[0])
             leagues = record.get("leagues")
             if not isinstance(leagues, dict) or league not in JSPORTS:
                 return []

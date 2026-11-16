@@ -25,7 +25,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.7.11"
+VERSION = "0.7.12"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -2224,7 +2224,9 @@ class Controller:
             return [odds_league_menu(
                 compact, available=available, probe=self.odds.tw_probe)]
         if compact == "台彩立即更新":
-            await self.odds.check_tw_public_now()
+            await self.odds.refresh_remote_reference()
+            if not sum(odds_today_available(self.odds).values()):
+                await self.odds.check_tw_public_now()
             return [odds_available_menu(
                 odds_today_available(self.odds), self.odds.tw_probe)]
         if compact == "台彩已更新":

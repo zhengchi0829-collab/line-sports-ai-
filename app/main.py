@@ -464,6 +464,9 @@ async def continuous_refresh(app):
     while True:
         started = time.monotonic()
         try:
+            # Lightweight quote refresh: no application redeploy, no paid API.
+            # The GitHub odds-cache branch is updated on a 10-minute schedule.
+            await app.state.controller.odds.refresh_remote_reference()
             results = await asyncio.gather(
                 *(app.state.controller.fixtures.refresh(key) for key in REFRESH_KEYS),
                 return_exceptions=True,
