@@ -9,6 +9,7 @@ on:
     paths:
       - ".github/workflows/taiwan-odds-update.yml"
       - "scripts/update_tw_official_odds.py"
+      - "scripts/tw_browser_capture.py"
       - "scripts/tw_odds_issue.py"
 
 permissions:
@@ -32,9 +33,18 @@ jobs:
           python3 scripts/update_tw_official_odds.py \
             --out app/tw_official_odds.json \
             --status "$RUNNER_TEMP/tw-odds-status.json"
+      - name: Open public official page with Chrome if HTTP download failed
+        id: browser
+        if: steps.fetch.outcome != 'success'
+        continue-on-error: true
+        run: |
+          python3 -m pip install --disable-pip-version-check "playwright>=1.55,<2"
+          python3 -m scripts.tw_browser_capture \
+            --out app/tw_official_odds.json \
+            --status "$RUNNER_TEMP/tw-odds-status.json"
       - name: Save verified snapshot and auto-deploy to Render
         id: push
-        if: steps.fetch.outcome == 'success'
+        if: steps.fetch.outcome == 'success' || steps.browser.outcome == 'success'
         continue-on-error: true
         run: |
           if git diff --quiet -- app/tw_official_odds.json; then
@@ -50,10 +60,10 @@ jobs:
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          FETCH_OUTCOME: ${{ steps.fetch.outcome }}
+          FETCH_OUTCOME: ${{ (steps.fetch.outcome == 'success' || steps.browser.outcome == 'success') && 'success' || 'failure' }}
           PUSH_OUTCOME: ${{ steps.push.outcome }}
           TW_STATUS_PATH: ${{ runner.temp }}/tw-odds-status.json
         run: python3 scripts/tw_odds_issue.py
       - name: Mark missing verified data as failed
-        if: steps.fetch.outcome != 'success' || steps.push.outcome != 'success'
+        if: (steps.fetch.outcome != 'success' && steps.browser.outcome != 'success') || steps.push.outcome != 'success'
         run: exit 1
