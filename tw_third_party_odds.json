@@ -1,26 +1,11 @@
 {
   "day": "2026-11-18",
-  "captured_at": "2026-11-18T06:40:15.453040+08:00",
+  "captured_at": "2026-11-18T07:37:25.562314+08:00",
   "source_url": "https://www.playsport.cc/gamesData/result?allianceid=4&gametime=20261118",
   "capture_method": "third_party_playsport",
   "source_note": "Third-party published Taiwan Sports Lottery reference odds. NOT verified with Taiwan Sports Lottery's live website. Please confirm against the official market before betting.",
   "leagues": {
     "足球": [
-      {
-        "event_id": "1029",
-        "away": "哥斯大黎加",
-        "home": "阿根廷",
-        "start": "2026-11-18T07:00:00+08:00",
-        "away_price": 10.0,
-        "home_price": 1.04,
-        "draw_price": 4.75,
-        "spread": null,
-        "spread_home_price": null,
-        "spread_away_price": null,
-        "total": 3.5,
-        "over_price": 1.82,
-        "under_price": 1.62
-      },
       {
         "event_id": "1028",
         "away": "海地",
