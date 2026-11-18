@@ -1,6 +1,6 @@
 {
   "day": "2026-11-18",
-  "captured_at": "2026-11-18T13:50:23.559162+08:00",
+  "captured_at": "2026-11-18T14:50:39.289970+08:00",
   "source_url": "https://www.playsport.cc/gamesData/result?allianceid=4&gametime=20261118",
   "capture_method": "third_party_playsport",
   "source_note": "Third-party published Taiwan Sports Lottery reference odds. NOT verified with Taiwan Sports Lottery's live website. Please confirm against the official market before betting.",
@@ -18,8 +18,8 @@
         "spread_home_price": null,
         "spread_away_price": null,
         "total": 2.5,
-        "over_price": 1.75,
-        "under_price": 1.68
+        "over_price": 1.78,
+        "under_price": 1.65
       }
     ]
   }
