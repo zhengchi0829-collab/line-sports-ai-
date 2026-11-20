@@ -9,6 +9,7 @@ import asyncio
 import os
 from .odds import OddsGateway, format_book, odds_market_insights
 from .team_logos import team_logo_url
+from .schedule import latest_analysis_slot
 import hashlib
 import math
 from .baseball_analysis import verified_baseball_analysis
@@ -25,7 +26,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.7.24"
+VERSION = "0.7.25"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -565,9 +566,16 @@ class Fixtures:
 
     async def on_date(self, sport: str, selected: date) -> Snapshot:
         """Fetch an exact-date snapshot without contaminating live/upcoming caches."""
-        key = (sport, selected)
+        now = datetime.now(TZ)
+        # Current-date scores can change quickly. Historical and future
+        # schedules remain reusable until the next 09/15/20 update slot.
+        slot = latest_analysis_slot(now) if selected != now.date() else "live"
+        key = (sport, selected, slot)
         cached = self.date_cache.get(key)
-        if cached and time.monotonic() - cached[0] < 240:
+        cache_ttl = 240 if selected == now.date() else 15 * 3600
+        if cached and time.monotonic() - cached[0] < cache_ttl:
+            log.info("dated_fixture_cache_hit sport=%s age_s=%d",
+                     sport, int(time.monotonic() - cached[0]))
             return cached[1]
         # Pre-match "立即分析" must not fetch the exact same ESPN fixtures
         # again when the planned 09/15/20 refresh already verified them.
@@ -1916,10 +1924,19 @@ class Controller:
     async def team_details(self, sport, a, b, league=None,
                            as_of: date | None = None, fixture: Game | None = None):
         """Verified recent form and registered players from the selected competition."""
+        now = datetime.now(TZ)
+        # Statistics must be refetched after the next scheduled analysis slot.
+        # Verified successful samples stay reusable for repeat LINE taps.
+        slot = (latest_analysis_slot(now)
+                if as_of is None or as_of >= now.date()
+                else "historical")
         key = (sport, league, a, b, as_of, fixture.ident if fixture else None,
-               fixture.start.isoformat() if fixture else None)
+               fixture.start.isoformat() if fixture else None, slot)
         cached = self.details.get(key)
-        if cached and time.monotonic() - cached[0] < 1200:
+        # Incomplete data is checked again sooner than a verified recommendation.
+        if cached and time.monotonic() - cached[0] < (
+                15 * 3600 if cached[1][2] is not None else 1200):
+            log.info("analysis_stats_cache_hit league=%s", league or sport)
             return cached[1]
         if sport == "棒球":
             # League-specific score and roster lookup; do not use MLB results for CPBL.

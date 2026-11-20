@@ -8,7 +8,7 @@ import sys
 import time
 import types
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -78,6 +78,56 @@ class FastButtonTests(unittest.IsolatedAsyncioTestCase):
             result = await ctl.fixtures.on_date("soccer_epl", when.date())
             self.assertEqual([g.ident for g in result.games], ["verified-future"])
             self.assertEqual(requests, [])
+            await ctl.close()
+
+
+    async def test_historical_date_cache_reuses_real_snapshot_across_taps(self):
+        """Historic exact-date queries should not repeatedly wait for providers."""
+        async with httpx.AsyncClient(transport=httpx.MockTransport(
+                lambda req: self.fail("Cached historic dates must not query the network"))) as client:
+            ctl = Controller(UI, client)
+            historic = date(2026, 6, 1)
+            slot = "historical-cached"
+            from app.schedule import latest_analysis_slot
+            # Set the exact key used by the date-specific cache.
+            key = ("soccer_epl", historic, latest_analysis_slot(datetime.now(TZ)))
+            verified = Snapshot([], datetime.now(TZ), [], 2)
+            ctl.fixtures.date_cache[key] = (time.monotonic() - 3600, verified)
+            result = await ctl.fixtures.on_date("soccer_epl", historic)
+            self.assertIs(result, verified)
+            await ctl.close()
+
+    async def test_verified_analysis_stats_cache_last_until_next_slot(self):
+        """A repeat click should not rerun ESPN when last-five data was verified."""
+        from app.schedule import latest_analysis_slot
+        async with httpx.AsyncClient(transport=httpx.MockTransport(
+                lambda req: self.fail("Verified cached stats must not be fetched"))) as client:
+            ctl = Controller(UI, client)
+            sport, league, first, second = "足球", "英超", "A", "B"
+            cached_value = ("5場4勝", "球員A", "A", {"form_games": 5})
+            key = (sport, league, first, second, None, None, None,
+                   latest_analysis_slot(datetime.now(TZ)))
+            ctl.details[key] = (time.monotonic() - 2400, cached_value)
+            self.assertEqual(
+                await ctl.team_details(sport, first, second, league),
+                cached_value)
+            await ctl.close()
+
+    async def test_incomplete_analysis_stats_refresh_before_next_slot(self):
+        """Unverified data must not be retained for hours just to gain speed."""
+        from app.schedule import latest_analysis_slot
+        async with httpx.AsyncClient(transport=httpx.MockTransport(
+                lambda req: httpx.Response(503))) as client:
+            ctl = Controller(UI, client)
+            key = ("足球", "英超", "A", "B", None, None, None,
+                   latest_analysis_slot(datetime.now(TZ)))
+            ctl.details[key] = (time.monotonic() - 2400,
+                                ("資料不足", "無主力名單", None, None))
+            # ESPN 503 quickly returns an unverified fallback; it must not
+            # incorrectly claim the previous incomplete record as verified.
+            result = await ctl.team_details("足球", "A", "B", "英超")
+            self.assertNotEqual(result[0], "資料不足")
+            self.assertIsNone(result[2])
             await ctl.close()
 
     async def test_today_uses_scheduled_cache_without_external_requests(self):
