@@ -791,6 +791,7 @@ async def feature_health():
                 "cached_events": sum(len(v) for v in platform.get("leagues", {}).values()
                                      if isinstance(v, list)),
                 "shared_cache_enabled": ctl.odds.shared_redis is not None,
+                "storage_error": bool(platform.get("storage_error")),
                 "attempted_leagues": len(platform.get("attempted_leagues", [])),
                 "deferred_leagues": len(platform.get("deferred_leagues", [])),
                 "schedule_taipei": "00:30",
