@@ -59,6 +59,59 @@ class UI:
     winner_team_details = AsyncMock(return_value=(None, None))
 
 
+
+
+class FastButtonTests(unittest.IsolatedAsyncioTestCase):
+    async def test_today_uses_scheduled_cache_without_external_requests(self):
+        requests = []
+        def handler(req):
+            requests.append(str(req.url))
+            raise AssertionError("Today's cached menu must not query ESPN")
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            ctl = Controller(UI, client)
+            current = datetime.now(TZ)
+            tomorrow_game = Game(
+                "upcoming-test", "soccer", "英超",
+                current + timedelta(hours=1),
+                "Home", "Away", source="verified-test")
+            ctl.fixtures.last["soccer_epl"] = Snapshot(
+                [tomorrow_game], current, [], 1)
+            start = time.monotonic()
+            result = await ctl.reply("今日賽事英超")
+            self.assertLess(time.monotonic() - start, 0.5)
+            self.assertEqual(requests, [])
+            self.assertIn("Home", json.dumps(result, ensure_ascii=False))
+            await ctl.close()
+
+    async def test_cold_today_returns_loading_without_slow_network(self):
+        calls = []
+        async def slow_handler(req):
+            calls.append(str(req.url))
+            await asyncio.sleep(.35)
+            return httpx.Response(200, json={"events": []})
+        async with httpx.AsyncClient(transport=httpx.MockTransport(slow_handler)) as client:
+            ctl = Controller(UI, client)
+            started = time.monotonic()
+            result = await ctl.reply("今日賽事英超")
+            self.assertLess(time.monotonic() - started, .22)
+            self.assertIn("背景同步", json.dumps(result, ensure_ascii=False))
+            self.assertIn("soccer_epl", ctl.fixtures.jobs)
+            await asyncio.sleep(.01)
+            self.assertTrue(calls)
+            await ctl.close()
+
+    async def test_sports_league_navigation_does_not_wait_for_esports_sources(self):
+        async def slow_handler(req):
+            await asyncio.sleep(.35)
+            return httpx.Response(200, json={"events": []})
+        async with httpx.AsyncClient(transport=httpx.MockTransport(slow_handler)) as client:
+            ctl = Controller(UI, client)
+            started = time.monotonic()
+            response = await ctl.reply("NBA")
+            self.assertLess(time.monotonic() - started, .22)
+            self.assertIn("背景同步", json.dumps(response, ensure_ascii=False))
+            await ctl.close()
+
 class ParserTests(unittest.TestCase):
     def test_espn_basketball_leagues_are_labeled_correctly(self):
         for kind, expected in (('basketball_ncaa', 'NCAA'),

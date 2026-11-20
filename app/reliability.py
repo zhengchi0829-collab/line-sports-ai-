@@ -25,7 +25,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.7.22"
+VERSION = "0.7.23"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -356,6 +356,33 @@ class Fixtures:
         self.retry_after: dict[str, float] = {}
         self.last: dict[str, Snapshot] = {}
         self.date_cache: dict[tuple[str, date], tuple[float, Snapshot]] = {}
+
+    def cached_or_warm(self, sport: str) -> Snapshot:
+        """Fast scheduled-cache read for buttons; never wait on upstream HTTP.
+
+        The scheduled 09:00/15:00/20:00 refresh is still authoritative.
+        If a free instance has just booted, run one deduplicated background
+        fetch and immediately tell LINE that its results are pending.
+        """
+        cached = self.last.get(sport)
+        if cached is not None:
+            return cached
+        task = self.jobs.get(sport)
+        if task is None or task.done():
+            task = asyncio.create_task(self.refresh(sport))
+            self.jobs[sport] = task
+
+            def log_background_failure(done: asyncio.Task):
+                if done.cancelled():
+                    return
+                try:
+                    done.result()
+                except Exception as exc:
+                    log.warning("fixture_warm_failed sport=%s kind=%s",
+                                sport, type(exc).__name__)
+
+            task.add_done_callback(log_background_failure)
+        return Snapshot(errors=["refresh_pending"])
 
     async def source(self, name: str, url: str, params: dict, kind: str,
                      include_final: bool = False) -> tuple[list[Game], str | None]:
@@ -1792,7 +1819,12 @@ class Controller:
         now = datetime.now(TZ)
         requested = selected or (now.date() if mode == TODAY else None)
         keys = (KEYS[league],) if league else CATEGORY_SOURCES[category]
-        if requested is not None:
+        # Today/upcoming buttons display the three-times-daily warm snapshot.
+        # Exact historical/custom dates still perform their own dated fetch.
+        if mode in (TODAY, FUTURE) and (
+                requested is None or requested == now.date()):
+            results = [self.fixtures.cached_or_warm(key) for key in keys]
+        elif requested is not None:
             results = await asyncio.gather(
                 *(self.fixtures.on_date(key, requested) for key in keys),
                 return_exceptions=True)
@@ -1802,11 +1834,14 @@ class Controller:
                 return_exceptions=True)
         options = []
         had_error = False
+        warming = False
         for key, result in zip(keys, results):
             if not isinstance(result, Snapshot):
                 had_error = True
                 continue
-            had_error = had_error or bool(result.errors)
+            warming = warming or "refresh_pending" in result.errors
+            had_error = had_error or any(error != "refresh_pending"
+                                         for error in result.errors)
             for game in result.games:
                 if ((requested is not None and game.start.date() == requested) or
                     (requested is None and mode == FUTURE and game.start.date() > now.date())):
@@ -1827,12 +1862,16 @@ class Controller:
                 break
         caption = f"{requested}｜{league or category}" if requested else f"{mode}｜{league or category}"
         if not bubbles:
-            info = caption + " 沒有查到該日實際賽事。"
+            if warming:
+                info = caption + " 賽程資料正在背景同步，請稍後再點一次。"
+            else:
+                info = caption + " 沒有查到該日實際賽事。"
             if had_error:
                 info += "\n部分賽程資料來源未回應，無法確認賽程是否完整。"
             return empty_state_card(caption, info, category="賽事",
                                     error=had_error, back=SPECIFIED if requested else MENU)
-        return {"type": "flex", "altText": caption + "｜點選實際賽事進行分析",
+        return {"type": "flex", "altText": caption + ("｜部分聯賽仍在同步" if warming
+                                                        else "｜點選實際賽事進行分析"),
                 "quickReply": quick_menu(),
                 "contents": {"type": "carousel", "contents": bubbles}}
 
@@ -2233,7 +2272,7 @@ class Controller:
         if compact in ("台灣運彩賠率", "娛樂平台賠率"):
             if compact == "台灣運彩賠率" and not sum(
                     odds_today_available(self.odds).values()):
-                await self.odds.check_tw_public_now()
+                self.odds.schedule_tw_public_probe()
             available = (odds_today_available(self.odds)
                          if compact == "台灣運彩賠率" else None)
             return [odds_league_menu(
@@ -2320,7 +2359,7 @@ class Controller:
                 today = datetime.now(TZ).strftime("%Y-%m-%d")
                 official = self.odds.official_daily_rows(league_name, today)
                 if not official:
-                    await self.odds.check_tw_public_now()
+                    self.odds.schedule_tw_public_probe()
                     official = self.odds.official_daily_rows(league_name, today)
                 if official:
                     return [odds_fixture_picker(
@@ -2383,7 +2422,12 @@ class Controller:
                                         odds_logo_lookup(self.fixtures, league_name))]
         if compact in KEYS:
             key = KEYS[compact]
-            return [fixture_cards(key, await self.fixtures.get(key), self.ui.team_zh)]
+            snap = self.fixtures.cached_or_warm(key)
+            if "refresh_pending" in snap.errors:
+                return [empty_state_card(
+                    compact, "賽程正在背景同步，請稍後再點一次。",
+                    category="賽事", back=MENU)]
+            return [fixture_cards(key, snap, self.ui.team_zh)]
         match = re.match(r"^\s*分析\s*(英超|西甲|德甲|義甲|法甲|歐冠|足球|籃球|棒球|NBA|NCAA|NBL|TPBL|MLB|NPB|KBO|CPBL|MiLB)\s*(.*)$", raw, re.S)
         if match:
             sport, matchup = match.groups()
@@ -2577,6 +2621,7 @@ class Controller:
 
     async def close(self):
         await self.fixtures.close()
+        await self.odds.close()
         tasks = list(self.jobs.values())
         for task in tasks:
             if not task.done():

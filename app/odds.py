@@ -406,6 +406,7 @@ class OddsGateway:
         self.tw_probe = {}
         self.tw_last_request = 0.0
         self.tw_probe_lock = asyncio.Lock()
+        self.tw_probe_task: asyncio.Task | None = None
         # Free JBot trial is shared across ALL developers. Only manual requests;
         # durable-on-instance daily cache avoids spending on repeated taps.
         self.jbot_trial_file = Path(os.getenv("JBOT_TRIAL_CACHE_PATH", "/tmp/line_sports_jbot_trial.json"))
@@ -797,6 +798,38 @@ class OddsGateway:
                      state["status"], state["count"], day,
                      state.get("source_captured_at") or "unknown")
             return state
+
+    def schedule_tw_public_probe(self) -> bool:
+        """Queue one free official-source probe without holding the LINE reply.
+
+        The public official page often returns HTTP 403 after a long timeout.
+        One background attempt per 30 minutes avoids repeated slow user taps.
+        """
+        if (self.tw_last_request and
+                time.monotonic() - self.tw_last_request < 1800):
+            return False
+        if self.tw_probe_task and not self.tw_probe_task.done():
+            return False
+        task = asyncio.create_task(self.check_tw_public_now())
+        self.tw_probe_task = task
+
+        def report_error(done: asyncio.Task):
+            if done.cancelled():
+                return
+            try:
+                done.result()
+            except Exception as exc:
+                log.warning("tw_odds_background_error kind=%s",
+                            type(exc).__name__)
+
+        task.add_done_callback(report_error)
+        return True
+
+    async def close(self):
+        task = self.tw_probe_task
+        if task and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
 
     async def check_tw_public_now(self, now=None):
         """One bounded public GET shared across LINE users; never bypass 403."""

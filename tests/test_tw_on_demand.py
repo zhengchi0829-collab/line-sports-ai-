@@ -57,3 +57,31 @@ class TaiwanOnDemandTests(unittest.IsolatedAsyncioTestCase):
             # A bad on-demand response must not manufacture new odds.
             # Existing independently verified daily snapshots may still exist.
             self.assertEqual(gateway.tw_live, {})
+
+
+class FastTaiwanOddsMenuTests(unittest.IsolatedAsyncioTestCase):
+    async def test_taiwan_menu_returns_immediately_while_official_probe_runs(self):
+        import time
+        from app.reliability import Controller
+
+        hits = []
+        async def slow_denial(req):
+            hits.append(req.url.path)
+            await asyncio.sleep(.25)
+            return httpx.Response(403)
+        async with httpx.AsyncClient(transport=httpx.MockTransport(slow_denial)) as client:
+            gateway_controller = Controller(UI, client)
+            gateway_controller.odds.tw_remote = {}
+            gateway_controller.odds.tw_live = {}
+            gateway_controller.odds.official_snapshot_file = Path("/tmp/missing_official_test_fast.json")
+            gateway_controller.odds.third_party_snapshot_file = Path("/tmp/missing_third_test_fast.json")
+            started = time.monotonic()
+            result = await gateway_controller.reply("台灣運彩賠率")
+            self.assertLess(time.monotonic() - started, .18)
+            self.assertIn("台灣運彩", json.dumps(result, ensure_ascii=False))
+            await asyncio.sleep(.3)
+            self.assertEqual(hits.count("/sportsbook/daily-coupons"), 1)
+            self.assertEqual(gateway_controller.odds.tw_probe.get("status"), "http_403")
+            await gateway_controller.reply("台灣運彩賠率")
+            self.assertEqual(hits.count("/sportsbook/daily-coupons"), 1)
+            await gateway_controller.close()

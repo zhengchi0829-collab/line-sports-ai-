@@ -856,7 +856,23 @@ async def process_event(event, app):
             if isinstance(selected_date, str):
                 raw = SPECIFIED + selected_date[:10]
 
+    # Route labels contain no team names, user IDs or chat content.
+    if raw.startswith("分析"):
+        safe_route = "analysis"
+    elif raw.startswith("今日賽事"):
+        safe_route = "today"
+    elif raw.startswith("未來賽事"):
+        safe_route = "upcoming"
+    elif raw.startswith("指定日期賽事"):
+        safe_route = "custom_date"
+    elif raw.startswith("賠率") or raw in ("檢視賠率", "台灣運彩賠率", "娛樂平台賠率"):
+        safe_route = "odds"
+    elif raw in ("足球", "籃球", "棒球"):
+        safe_route = "sport_menu"
+    else:
+        safe_route = "menu_or_other"
     fallback_text = "系統剛剛忙碌或資料來源暫時無法回應，請再點一次原本的按鈕。"
+    preparation_ms = 0
     try:
         # Pass only the sender's LINE user ID to authorize private JBot tests.
         # Never log or persist the ID in the odds cache.
@@ -877,6 +893,7 @@ async def process_event(event, app):
         log.warning("command_error kind=%s raw=%s", type(exc).__name__, str(raw)[:40])
         messages = [{"type": "text", "text": fallback_text, "quickReply": quick_menu()}]
 
+    preparation_ms = int((time.monotonic() - started) * 1000)
     token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "").strip()
     payload = {"replyToken": event["replyToken"], "messages": messages[:5]}
     reply_ok = False
@@ -911,10 +928,11 @@ async def process_event(event, app):
                 )
         reply_ok = 200 <= response.status_code < 300
         log.info(
-            "line_reply version=%s status=%s elapsed_ms=%d messages=%d",
+            "line_reply version=%s status=%s elapsed_ms=%d messages=%d route=%s prepare_ms=%d send_ms=%d",
             VERSION, response.status_code,
             int((time.monotonic() - started) * 1000),
-            len(payload["messages"]),
+            len(payload["messages"]), safe_route, preparation_ms,
+            int((time.monotonic() - started) * 1000) - preparation_ms,
         )
         if not reply_ok:
             fallback_ok = await _push_fallback(
