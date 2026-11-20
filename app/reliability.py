@@ -25,7 +25,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-VERSION = "0.7.23"
+VERSION = "0.7.24"
 TZ = ZoneInfo("Asia/Taipei")
 SPORTS = {"soccer": "\u8db3\u7403", "basketball": "\u7c43\u7403", "baseball": "\u68d2\u7403"}
 KEYS = {v: k for k, v in SPORTS.items()}
@@ -569,26 +569,26 @@ class Fixtures:
         cached = self.date_cache.get(key)
         if cached and time.monotonic() - cached[0] < 240:
             return cached[1]
-        # The UCL listing has already fetched this game's verified ESPN data.
-        # Reusing the fresh selected-date fixtures makes its "立即分析" button
-        # immediate instead of blocking on 2 more scoreboard HTTP requests.
-        # Avoid stale completed/live results: only reuse future kickoffs.
-        if sport == "soccer_ucl":
-            previous = self.last.get(sport)
-            record = self.cache.get(sport)
-            now = datetime.now(TZ)
-            if (previous and record and previous.successes > 0 and
-                    time.monotonic() - record[0] < 900):
-                available = [game for game in previous.games
-                             if game.start.date() == selected
-                             and game.start > now and game.state == "scheduled"]
-                if available:
-                    snap = Snapshot(available, previous.fetched, previous.errors,
-                                    previous.successes, previous.stale)
-                    self.date_cache[key] = (time.monotonic(), snap)
-                    log.info("ucl_analysis_fixture_cache_hit date=%s games=%s",
-                             selected, len(available))
-                    return snap
+        # Pre-match "立即分析" must not fetch the exact same ESPN fixtures
+        # again when the planned 09/15/20 refresh already verified them.
+        # Only reuse scheduled *future* kickoffs. Live, final or past fixtures
+        # need a new authoritative result instead of a stale pregame card.
+        previous = self.last.get(sport)
+        record = self.cache.get(sport)
+        now = datetime.now(TZ)
+        if (selected >= now.date() and previous and record and
+                previous.successes > 0 and
+                time.monotonic() - record[0] < 15 * 3600):
+            available = [game for game in previous.games
+                         if game.start.date() == selected
+                         and game.start > now and game.state == "scheduled"]
+            if available:
+                snap = Snapshot(available, previous.fetched, previous.errors,
+                                previous.successes, previous.stale)
+                self.date_cache[key] = (time.monotonic(), snap)
+                log.info("dated_analysis_fixture_cache_hit sport=%s date=%s games=%s",
+                         sport, selected, len(available))
+                return snap
         specs = self.specs_for_date(sport, selected)
         if not specs:
             return Snapshot(errors=["no_source_for_date"])

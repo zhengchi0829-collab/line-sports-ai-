@@ -62,6 +62,24 @@ class UI:
 
 
 class FastButtonTests(unittest.IsolatedAsyncioTestCase):
+    async def test_future_analysis_reuses_verified_scheduled_fixture(self):
+        requests = []
+        def handler(req):
+            requests.append(str(req.url))
+            raise AssertionError("Verified future fixture must not refetch ESPN")
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            ctl = Controller(UI, client)
+            when = datetime.now(TZ) + timedelta(days=1)
+            game = Game("verified-future", "soccer", "英超", when,
+                        "Home", "Away", source="ESPN", state="scheduled")
+            snap = Snapshot([game], datetime.now(TZ), [], 1)
+            ctl.fixtures.last["soccer_epl"] = snap
+            ctl.fixtures.cache["soccer_epl"] = (time.monotonic(), snap)
+            result = await ctl.fixtures.on_date("soccer_epl", when.date())
+            self.assertEqual([g.ident for g in result.games], ["verified-future"])
+            self.assertEqual(requests, [])
+            await ctl.close()
+
     async def test_today_uses_scheduled_cache_without_external_requests(self):
         requests = []
         def handler(req):
