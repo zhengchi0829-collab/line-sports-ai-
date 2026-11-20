@@ -15,6 +15,8 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import httpx
+import redis.asyncio as redis_async
+from redis.exceptions import RedisError
 
 TZ = ZoneInfo("Asia/Taipei")
 TW_CACHE_URL = ("https://raw.githubusercontent.com/zhengchi0829-collab/"
@@ -394,6 +396,12 @@ class OddsGateway:
         self.daily_lock = asyncio.Lock()
         self.daily_file = Path(os.getenv("ODDS_DAILY_CACHE_PATH", "/tmp/line_sports_odds_daily.json"))
         self.daily = self._read_daily()
+        shared_url = os.getenv("PLATFORM_ODDS_REDIS_URL", "").strip()
+        # A separate free Key Value instance survives web deployments;
+        # it is still in-memory and may lose data if Key Value itself restarts.
+        self.shared_redis = (redis_async.from_url(
+            shared_url, socket_connect_timeout=1.2, socket_timeout=1.2,
+            retry_on_timeout=False) if shared_url else None)
         self.public_blob_cache = {}
         self.official_snapshot_file = Path(__file__).resolve().parent / "tw_official_odds.json"
         self.third_party_snapshot_file = Path(__file__).resolve().parent / "tw_third_party_odds.json"
@@ -434,13 +442,80 @@ class OddsGateway:
             # Never spend paid API credits without being able to remember it.
             return False
 
+
+    @staticmethod
+    def _shared_key(day: str) -> str:
+        return "line-sports-ai:platform-odds:" + day
+
+    async def restore_shared_daily(self) -> bool:
+        """Restore same-day quotes after a web deploy without spending API credits."""
+        client = self.shared_redis
+        if client is None:
+            return False
+        day = datetime.now(TZ).date().isoformat()
+        try:
+            payload = await asyncio.wait_for(client.get(self._shared_key(day)),
+                                             timeout=1.7)
+            if payload:
+                if len(payload) > 1_500_000:
+                    raise ValueError("Invalid odds-cache payload size")
+                saved = json.loads(payload)
+                if (isinstance(saved, dict) and saved.get("day") == day
+                        and isinstance(saved.get("leagues"), dict)
+                        and saved.get("state") in {
+                            "ready", "attempted", "quota", "no_events",
+                            "missing_key", "catalog_error", "storage_unavailable"}):
+                    if (self.daily.get("day") != day or
+                            (self.daily.get("state") != "ready" and
+                             saved.get("state") == "ready")):
+                        self.daily = saved
+                        self._save_daily(saved)
+                    count = sum(len(v) for v in
+                                self.daily.get("leagues", {}).values()
+                                if isinstance(v, list))
+                    log.info("platform_cache_restore status=%s day=%s fixtures=%s",
+                             self.daily.get("state"), day, count)
+                    return True
+            log.info("platform_cache_restore status=empty day=%s", day)
+            return False
+        except (RedisError, OSError, TimeoutError, ValueError, TypeError) as exc:
+            log.warning("platform_cache_restore status=error kind=%s",
+                        type(exc).__name__)
+            return False
+
+    async def save_shared_daily(self, record: dict) -> bool:
+        """Write the attempt marker and completed rows to the shared cache."""
+        if self.shared_redis is None:
+            return True  # Local tests and deployments without shared storage
+        try:
+            payload = json.dumps(record, ensure_ascii=False, separators=(",", ":"))
+            if len(payload) > 1_500_000:
+                raise ValueError("Odds cache exceeds storage limit")
+            success = await asyncio.wait_for(
+                self.shared_redis.set(
+                    self._shared_key(record["day"]), payload, ex=48 * 3600),
+                timeout=1.7)
+            if not success:
+                return False
+            log.info("platform_cache_write day=%s state=%s fixtures=%s",
+                     record["day"], record.get("state"),
+                     sum(len(v) for v in record.get("leagues", {}).values()
+                         if isinstance(v, list)))
+            return True
+        except (RedisError, OSError, TimeoutError, TypeError, ValueError) as exc:
+            log.warning("platform_cache_write status=error kind=%s",
+                        type(exc).__name__)
+            return False
+
     def daily_status(self, league):
         day = datetime.now(TZ).strftime("%Y-%m-%d")
         record = self.daily
         if record.get("day") != day:
-            return "available"
+            return "not_cached"
         if record.get("state") == "quota":
             return "quota"
+        if record.get("state") == "storage_unavailable":
+            return "storage_unavailable"
         if record.get("state") == "attempted":
             return "unavailable"
         if league in record.get("deferred_leagues", []):
@@ -487,11 +562,15 @@ class OddsGateway:
         now = datetime.now(TZ)
         day = now.strftime("%Y-%m-%d")
         async with self.daily_lock:
+            if self.daily.get("day") != day:
+                await self.restore_shared_daily()
             if self.daily.get("day") == day:
                 return self.stored_platform_rows(league)
             key = (os.getenv("ODDS_API_KEY") or os.getenv("THE_ODDS_API_KEY") or "").strip()
             if not key:
-                self._save_daily({"day": day, "state": "missing_key", "leagues": {}})
+                record = {"day": day, "state": "missing_key", "leagues": {}}
+                self._save_daily(record)
+                await self.save_shared_daily(record)
                 return []
             headers = {"x-api-key": key}
             try:
@@ -507,10 +586,12 @@ class OddsGateway:
                     raise ValueError("Quota headers unavailable")
                 remaining = int(raw)
             except (httpx.HTTPError, ValueError, TypeError, KeyError) as exc:
-                self._save_daily({
+                record = {
                     "day": day, "state": "catalog_error",
                     "leagues": {}, "error_type": type(exc).__name__,
-                })
+                }
+                self._save_daily(record)
+                await self.save_shared_daily(record)
                 return []
 
             active = {row.get("key") for row in catalog
@@ -525,17 +606,20 @@ class OddsGateway:
             deferred = [label for label, _ in supported
                         if label not in {label for label, _, _ in plan}]
             if not plan:
-                self._save_daily({
+                record = {
                     "day": day, "state": "quota" if supported else "no_events",
                     "leagues": {}, "remaining": remaining,
                     "credits_budget": budget, "credits_planned": 0,
                     "deferred_leagues": deferred, "not_offered": not_offered,
-                })
+                }
+                self._save_daily(record)
+                await self.save_shared_daily(record)
                 return []
 
             # Never make chargeable calls unless an attempt marker is saved.
             pending = {
                 "day": day, "state": "attempted",
+                "captured_at": now.isoformat(),
                 "leagues": {}, "remaining": remaining,
                 "credits_budget": budget, "credits_planned": planned,
                 "attempted_leagues": [name for name, _, _ in plan],
@@ -543,6 +627,10 @@ class OddsGateway:
                 "not_offered": not_offered,
             }
             if not self._save_daily(pending):
+                return []
+            # Shared pending marker must be committed BEFORE spending credits.
+            if not await self.save_shared_daily(pending):
+                self._save_daily({**pending, "state": "storage_unavailable"})
                 return []
 
             async def fetch_one(label, sport_key, markets):
@@ -556,13 +644,29 @@ class OddsGateway:
                     if response.status_code != 200:
                         return label, [], None, "api_error"
                     all_rows = theodds_normalize(response.json())
-                    seen = set()
-                    rows = []
+                    # Prefer a complete, newer quotation from one bookmaker;
+                    # never blend unmatched odds from different bookmakers.
+                    unique = {}
+                    def quote_rank(row):
+                        h2h = number(row.get("home_price")) and number(row.get("away_price"))
+                        spreads = (number(row.get("spread")) is not None and
+                                   number(row.get("spread_home_price")) and
+                                   number(row.get("spread_away_price")))
+                        totals = (number(row.get("total")) is not None and
+                                  number(row.get("over_price")) and
+                                  number(row.get("under_price")))
+                        return (int(bool(h2h)) + int(bool(spreads)) +
+                                int(bool(totals)), str(row.get("updated") or ""))
                     for row in all_rows:
+                        if (not row["home"] or not row["away"] or
+                                not parse_time(row.get("start"))):
+                            continue
                         identity = (row["home"], row["away"], row["start"])
-                        if identity not in seen:
-                            seen.add(identity)
-                            rows.append(row)
+                        if (identity not in unique or
+                                quote_rank(row) > quote_rank(unique[identity])):
+                            unique[identity] = row
+                    rows = sorted(unique.values(),
+                                  key=lambda row: row.get("start") or "")
                     balance = response.headers.get("x-requests-remaining")
                     return label, rows, (
                         int(balance) if balance is not None and balance.isdecimal()
@@ -583,7 +687,8 @@ class OddsGateway:
                         if balance is not None]
             attempted = [label for label, _, _, _ in outcomes]
             result = {
-                "day": day, "state": "ready", "leagues": leagues,
+                "day": day, "state": "ready",
+                "captured_at": now.isoformat(), "leagues": leagues,
                 "remaining": min(balances) if balances else remaining,
                 "credits_budget": budget, "credits_planned": planned,
                 "attempted_leagues": attempted, "not_offered": not_offered,
@@ -595,6 +700,7 @@ class OddsGateway:
                                    if state == "api_error"],
             }
             self._save_daily(result)
+            await self.save_shared_daily(result)
             return leagues.get(league, [])
 
     async def _public_blob_feed(self, league, date):
@@ -830,6 +936,8 @@ class OddsGateway:
         if task and not task.done():
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
+        if self.shared_redis is not None:
+            await self.shared_redis.aclose()
 
     async def check_tw_public_now(self, now=None):
         """One bounded public GET shared across LINE users; never bypass 403."""

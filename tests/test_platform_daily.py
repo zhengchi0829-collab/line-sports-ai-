@@ -76,6 +76,141 @@ class PlatformDailyTests(unittest.IsolatedAsyncioTestCase):
                         self.assertLessEqual(gateway.daily["credits_planned"], 7)
                         self.assertEqual(gateway.daily["day"], "2026-11-17")
 
+
+    async def test_shared_cache_restores_after_deploy_without_charge(self):
+        """New web instance reads same-day prices without any more /odds calls."""
+        class MemoryRedis:
+            def __init__(self):
+                self.data = {}
+            async def get(self, key):
+                return self.data.get(key)
+            async def set(self, key, value, ex=None):
+                self.data[key] = value.encode()
+                return True
+            async def aclose(self):
+                return None
+        requests = []
+        def handler(req):
+            requests.append(str(req.url))
+            if req.url.path.endswith("/sports/"):
+                return httpx.Response(200, json=[
+                    {"key": "basketball_nba", "active": True}
+                ], headers={"x-requests-remaining": "107"})
+            if req.url.path.endswith("/odds"):
+                return httpx.Response(200, json=[{
+                    "home_team": "Home", "away_team": "Away",
+                    "commence_time": "2026-11-18T12:00:00Z",
+                    "bookmakers": [{
+                        "title": "Book", "last_update": "2026-11-17T00:30:00Z",
+                        "markets": [{"key": "h2h", "outcomes": [
+                            {"name": "Home", "price": 1.6},
+                            {"name": "Away", "price": 2.1},
+                        ]}],
+                    }],
+                }], headers={"x-requests-remaining": "100"})
+            raise AssertionError("Unexpected provider API call")
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            shared = MemoryRedis()
+            with tempfile.TemporaryDirectory() as directory:
+                first = OddsGateway(client)
+                first.daily_file = Path(directory) / "first.json"
+                first.daily = {}
+                first.shared_redis = shared
+                with patch.dict("os.environ", {"ODDS_API_KEY": "test-key"}), \
+                     patch("app.odds.datetime") as clock:
+                    clock.now.return_value = self.now
+                    await first.refresh_platform_daily()
+                    self.assertEqual(first.daily["state"], "ready")
+                    self.assertTrue(first.stored_platform_rows("NBA"))
+                    initial = len(requests)
+                    second = OddsGateway(client)
+                    second.daily_file = Path(directory) / "second.json"
+                    second.daily = {}
+                    second.shared_redis = shared
+                    self.assertTrue(await second.restore_shared_daily())
+                    self.assertEqual(second.daily["state"], "ready")
+                    self.assertEqual(second.stored_platform_rows("NBA"),
+                                     first.stored_platform_rows("NBA"))
+                    await second.refresh_platform_daily()
+                    self.assertEqual(len(requests), initial)
+                    await second.close()
+                await first.close()
+
+    async def test_no_paid_api_call_when_shared_marker_cannot_be_saved(self):
+        class BrokenRedis:
+            async def get(self, key):
+                return None
+            async def set(self, key, value, ex=None):
+                raise ConnectionError("shared instance unavailable")
+            async def aclose(self):
+                return None
+        calls = []
+        def handler(req):
+            calls.append(req.url.path)
+            if req.url.path.endswith("/sports/"):
+                return httpx.Response(200, json=[
+                    {"key": "basketball_nba", "active": True}
+                ], headers={"x-requests-remaining": "107"})
+            raise AssertionError("Must not buy odds if shared cache is down")
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            gateway = OddsGateway(client)
+            with tempfile.TemporaryDirectory() as directory:
+                gateway.daily_file = Path(directory) / "daily.json"
+                gateway.daily = {}
+                gateway.shared_redis = BrokenRedis()
+                with patch.dict("os.environ", {"ODDS_API_KEY": "test-key"}), \
+                     patch("app.odds.datetime") as clock:
+                    clock.now.return_value = self.now
+                    await gateway.refresh_platform_daily()
+                self.assertEqual(gateway.daily["state"], "storage_unavailable")
+                self.assertEqual(calls, ["/v4/sports/"])
+                await gateway.close()
+
+    async def test_pick_single_bookmaker_with_complete_markets(self):
+        requests = []
+        def handler(req):
+            requests.append(str(req.url))
+            if req.url.path.endswith("/sports/"):
+                return httpx.Response(200, json=[
+                    {"key": "basketball_nba", "active": True}
+                ], headers={"x-requests-remaining": "107"})
+            if req.url.path.endswith("/odds"):
+                common = {
+                    "home_team": "Home", "away_team": "Away",
+                    "commence_time": "2026-11-18T12:00:00Z",
+                }
+                books = [
+                    {"title": "Partial", "last_update": "2026-11-17T00:29:00Z",
+                     "markets": [{"key": "h2h", "outcomes": [
+                         {"name": "Home", "price": 1.6},
+                         {"name": "Away", "price": 2.1}]}]},
+                    {"title": "Full", "last_update": "2026-11-17T00:30:00Z",
+                     "markets": [
+                         {"key": "h2h", "outcomes": [
+                             {"name": "Home", "price": 1.7},
+                             {"name": "Away", "price": 2.0}]},
+                         {"key": "totals", "outcomes": [
+                             {"name": "Over", "point": 224.5, "price": 1.91},
+                             {"name": "Under", "point": 224.5, "price": 1.91}]}]}
+                ]
+                return httpx.Response(200, json=[{**common, "bookmakers": books}],
+                                      headers={"x-requests-remaining": "100"})
+            raise AssertionError("unexpected")
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            gateway = OddsGateway(client)
+            with tempfile.TemporaryDirectory() as directory:
+                gateway.daily_file = Path(directory) / "daily.json"
+                gateway.daily = {}
+                with patch.dict("os.environ", {"ODDS_API_KEY": "test-key"}), \
+                     patch("app.odds.datetime") as clock:
+                    clock.now.return_value = self.now
+                    await gateway.refresh_platform_daily()
+                    row = gateway.stored_platform_rows("NBA")[0]
+                self.assertEqual(row["book"], "Full")
+                self.assertEqual(row["total"], 224.5)
+                self.assertEqual(row["home_price"], 1.7)
+                await gateway.close()
+
     async def test_missing_key_stops_without_any_billable_call(self):
         seen = []
         async with httpx.AsyncClient(transport=httpx.MockTransport(

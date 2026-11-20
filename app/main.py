@@ -723,6 +723,7 @@ async def lifespan(app):
                                                      max_keepalive_connections=24)) as source_client, \
                httpx.AsyncClient(timeout=httpx.Timeout(5, connect=2)) as line_client:
         app.state.controller = Controller(ui, source_client)
+        await app.state.controller.odds.restore_shared_daily()
         app.state.team_logo_client = source_client
         # Log boolean readiness only. Never expose trial token or tester user IDs.
         log.info("jbot_trial_setup key_present=%s tester_ids_configured=%s",
@@ -787,6 +788,9 @@ async def feature_health():
             "platform_odds": {
                 "day": platform.get("day"),
                 "status": platform.get("state", "not_attempted"),
+                "cached_events": sum(len(v) for v in platform.get("leagues", {}).values()
+                                     if isinstance(v, list)),
+                "shared_cache_enabled": ctl.odds.shared_redis is not None,
                 "attempted_leagues": len(platform.get("attempted_leagues", [])),
                 "deferred_leagues": len(platform.get("deferred_leagues", [])),
                 "schedule_taipei": "00:30",
