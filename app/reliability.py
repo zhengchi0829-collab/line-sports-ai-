@@ -1303,12 +1303,38 @@ def odds_available_menu(available: dict[str, int], probe: dict | None = None) ->
 
 def odds_league_menu(provider: str, sport: str | None = None,
                      available: dict[str, int] | None = None,
-                     probe: dict | None = None) -> dict:
+                     probe: dict | None = None,
+                     platform_daily: dict | None = None) -> dict:
     """Odds navigation: source -> sport -> league, with verified-data status."""
     prefix = "台灣運彩" if provider == "台灣運彩賠率" else "娛樂平台"
     groups = ODDS_GROUPS[prefix]
     counts = available or {}
     is_tw = prefix == "台灣運彩"
+    # Production passes the saved daily snapshot. Standalone render tests may
+    # omit it, preserving the simple source/league navigation in test fixtures.
+    has_platform_status = not is_tw and isinstance(platform_daily, dict)
+    current_day = datetime.now(TZ).date().isoformat()
+    platform_valid = (has_platform_status and
+                      platform_daily.get("day") == current_day)
+    platform_rows = (platform_daily.get("leagues") or {}
+                     if platform_valid else {})
+    if not isinstance(platform_rows, dict):
+        platform_rows = {}
+    def platform_count(league: str) -> int:
+        records = platform_rows.get(league, [])
+        return len(records) if isinstance(records, list) else 0
+    def platform_missing_reason(league: str) -> str:
+        if not platform_valid:
+            return "本日快取未建立"
+        if league in platform_daily.get("deferred_leagues", []):
+            return "免費額度未排程"
+        if league in platform_daily.get("not_offered", []):
+            return "來源未提供"
+        if league in platform_daily.get("empty_leagues", []):
+            return "無開盤賽事"
+        if league in platform_daily.get("failed_leagues", []):
+            return "來源連線失敗"
+        return "沒有已保存盤口"
     if sport is None:
         actions = []
         total = sum(counts.values())
@@ -1318,11 +1344,30 @@ def odds_league_menu(provider: str, sport: str | None = None,
                 else "🔄 立即抓取台彩賠率",
                 "台彩已更新" if total else "台彩立即更新",
                 "#0F766E"))
+        elif has_platform_status:
+            ready_count = sum(platform_count(league) for leagues in groups.values()
+                              for league in leagues)
+            if platform_valid:
+                stamp = str(platform_daily.get("captured_at") or "")[:16].replace("T", " ")
+                note = (f"📡 The Odds API｜今日已存 {ready_count} 場"
+                        + (f"｜台灣時間 {stamp}" if stamp else "｜00:30 定時批次"))
+                actions.append(text(note, "sm", "#0F766E", "bold"))
+                if not ready_count:
+                    actions.append(text("今天的批次沒有可查賽事，或免費額度不足；"
+                                        "不會因點選而再次扣額。", "xs", "#64748B"))
+            else:
+                actions.append(text(
+                    "⚠️ 本日平台賠率快取目前不存在，可能因免費主機重新部署而遺失。"
+                    "不會為了點擊按鈕再扣一次額度；預定明日 00:30 同步。",
+                    "sm", "#B45309"))
         for category in ("足球", "籃球", "棒球"):
             count = sum(counts.get(league, 0) for league in groups[category])
             label = ODDS_EMOJIS[category] + " " + category + "賽事"
             if is_tw:
                 label += f"｜{count} 場已更新" if count else "｜尚未取得賠率"
+            elif has_platform_status:
+                count = sum(platform_count(league) for league in groups[category])
+                label += f"｜{count} 場可查" if count else "｜無已存盤口"
             actions.append(button(label, "賠率分類" + prefix + category,
                                   ODDS_COLORS[category]))
         description = (
@@ -1337,7 +1382,10 @@ def odds_league_menu(provider: str, sport: str | None = None,
             return odds_league_menu(provider, available=counts)
         title = provider + "｜" + sport
         description = ("帶有「已更新」標記的聯賽才有可核實的官網快照。"
-                       if is_tw else "選擇聯賽後才載入實際可查賠率")
+                       if is_tw else
+                       "綠色標記代表今日已保存真實盤口；灰色聯賽目前不可查。"
+                       if has_platform_status else
+                       "選擇聯賽後才載入實際可查賠率")
         actions = []
         for league in groups[sport]:
             if is_tw:
@@ -1345,10 +1393,22 @@ def odds_league_menu(provider: str, sport: str | None = None,
                 label = (f"✅ {league}｜已更新 {count} 場" if count
                          else f"◻ {league}｜尚未取得賠率")
                 color = ODDS_COLORS[sport] if count else "#334155"
+                actions.append(button(label, "賠率" + prefix + league, color))
+            elif has_platform_status:
+                count = platform_count(league)
+                if count:
+                    actions.append(button(
+                        f"✅ {league}｜{count} 場賠率",
+                        "賠率" + prefix + league, ODDS_COLORS[sport]))
+                else:
+                    # Do not give a clickable appearance to a missing market.
+                    actions.append(text(
+                        f"◻ {league}｜{platform_missing_reason(league)}",
+                        "sm", "#64748B"))
             else:
-                label = "📈 " + league
-                color = ODDS_COLORS[sport]
-            actions.append(button(label, "賠率" + prefix + league, color))
+                actions.append(button(
+                    "📈 " + league, "賠率" + prefix + league,
+                    ODDS_COLORS[sport]))
         if is_tw:
             total = sum(counts.values())
             if total:
@@ -2299,7 +2359,8 @@ class Controller:
             available = (odds_today_available(self.odds)
                          if compact == "台灣運彩賠率" else None)
             return [odds_league_menu(
-                compact, available=available, probe=self.odds.tw_probe)]
+                compact, available=available, probe=self.odds.tw_probe,
+                platform_daily=self.odds.daily if compact == "娛樂平台賠率" else None)]
         if compact == "台彩立即更新":
             await self.odds.refresh_remote_reference()
             if not sum(odds_today_available(self.odds).values()):
@@ -2317,7 +2378,8 @@ class Controller:
                          if source == "台灣運彩" else None)
             return [odds_league_menu(
                 source + "賠率", sport, available,
-                self.odds.tw_probe if source == "台灣運彩" else None)]
+                self.odds.tw_probe if source == "台灣運彩" else None,
+                platform_daily=self.odds.daily if source == "娛樂平台" else None)]
         odds_page = re.fullmatch(
             r"賠率頁(台灣運彩|娛樂平台)(足球|英超|西甲|德甲|義甲|法甲|歐冠|NBA|NCAA|NBL|TPBL|MLB|NPB|KBO|CPBL|MiLB)#([0-9]{1,2})",
             compact)
@@ -2362,7 +2424,9 @@ class Controller:
             if provider == "platform":
                 daily = self.odds.daily
                 if daily.get("day") != datetime.now(TZ).strftime("%Y-%m-%d"):
-                    return [{"type": "text", "text": "本日賠率快取尚未建立或已過期，請重新選擇聯盟。",
+                    return [{"type": "text",
+                             "text": "本日平台賠率尚無已保存快照。"
+                                     "重新點選不會增加額度消耗；請查看每日 00:30 的更新結果。",
                              "quickReply": quick_menu()}]
                 records = self.odds.stored_platform_rows(league_name)
             else:
@@ -2401,7 +2465,12 @@ class Controller:
             if not data:
                 if provider == "platform":
                     status = self.odds.daily_status(league_name)
-                    reason = ("免費賠率額度不足以同步全部聯盟；本日暫不進行額外查詢。"
+                    reason = ("當日平台快取不存在（可能因免費主機重啟遺失），"
+                              "為保護免費額度不會立即重抓。預定明日 00:30 更新。"
+                              if status == "not_cached" else
+                              "共享快取暫時無法寫入；為保護免費額度停止本日盤口請求。"
+                              if status == "storage_unavailable" else
+                              "免費賠率額度不足以同步全部聯盟；本日暫不進行額外查詢。"
                               if status == "quota" else
                               "為保留每月免費 Credits，本日未排程此聯賽；下次 00:30 再更新。"
                               if status == "deferred" else
