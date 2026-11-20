@@ -1,9 +1,12 @@
+import asyncio
 import json
 import unittest
 from datetime import datetime
+from pathlib import Path
 import httpx
 from app.odds import OddsGateway, TZ
 from app.reliability import odds_available_menu, odds_league_menu
+from app import legacy as UI
 
 NOW = datetime(2026, 11, 16, 16, 30, tzinfo=TZ)
 PAGE = """<table><tr><th>日期</th><th>時間</th><th>運動</th><th>客隊</th>
