@@ -121,6 +121,9 @@ def check(base):
                 "platform_cache_missing",
                 "Platform odds scheduled snapshot unavailable after 03:00; "
                 "check shared free Key Value and today's 00:30 batch")
+        if platform.get("day") == now.date().isoformat() and platform.get("storage_error"):
+            raise MonitorError("platform_storage_failed",
+                               "Daily platform odds snapshot could not be saved to shared storage")
         if platform.get("day") == now.date().isoformat() and (
                 platform.get("status") in {
                     "catalog_error", "missing_key", "storage_unavailable",
