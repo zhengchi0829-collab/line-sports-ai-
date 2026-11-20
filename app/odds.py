@@ -476,6 +476,16 @@ class OddsGateway:
                     log.info("platform_cache_restore status=%s day=%s fixtures=%s",
                              self.daily.get("state"), day, count)
                     return True
+            # A same-day local snapshot can exist when shared storage was
+            # provisioned after the morning batch. Seed without API spending.
+            if (self.daily.get("day") == day
+                    and self.daily.get("state") in {"ready", "attempted",
+                        "quota", "no_events", "missing_key", "catalog_error"}
+                    and isinstance(self.daily.get("leagues"), dict)):
+                seeded = await self.save_shared_daily(self.daily)
+                log.info("platform_cache_seed day=%s saved=%s state=%s",
+                         day, seeded, self.daily.get("state"))
+                return seeded
             log.info("platform_cache_restore status=empty day=%s", day)
             return False
         except (RedisError, OSError, TimeoutError, ValueError, TypeError) as exc:
@@ -700,7 +710,12 @@ class OddsGateway:
                                    if state == "api_error"],
             }
             self._save_daily(result)
-            await self.save_shared_daily(result)
+            if not await self.save_shared_daily(result):
+                # Keep today's quotes available in memory, but expose the
+                # persistence failure instead of silently claiming success.
+                result["storage_error"] = True
+                self._save_daily(result)
+                log.error("platform_cache_final_save_failed day=%s", day)
             return leagues.get(league, [])
 
     async def _public_blob_feed(self, league, date):
