@@ -493,6 +493,20 @@ async def continuous_refresh(app):
                         await app.state.controller.odds.refresh_platform_daily()
                     else:
                         log.info("scheduled_platform_odds day=%s already_cached=true", day)
+            # Explicit user-requested one-off recovery on 2026-11-20.
+            # The routine requires a shared saved attempt marker BEFORE any
+            # chargeable calls and refuses to fetch if today's record exists.
+            manual_day = os.getenv("PLATFORM_ODDS_MANUAL_DAY", "").strip()
+            if (manual_day == "2026-11-20"
+                    and now.date().isoformat() == manual_day
+                    and app.state.platform_scheduled_attempt_day != "manual:" + manual_day):
+                app.state.platform_scheduled_attempt_day = "manual:" + manual_day
+                await app.state.controller.odds.restore_shared_daily()
+                if app.state.controller.odds.daily.get("day") != manual_day:
+                    log.warning("platform_manual_recovery start day=%s", manual_day)
+                    await app.state.controller.odds.refresh_platform_daily()
+                else:
+                    log.info("platform_manual_recovery already_saved day=%s", manual_day)
             if time.monotonic() - last_webhook_check >= 600:
                 last_webhook_check = time.monotonic()
                 await verify_line_webhook(app)
