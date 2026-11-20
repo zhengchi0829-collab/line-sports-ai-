@@ -110,6 +110,32 @@ class MonitorTests(unittest.TestCase):
             clock.now.return_value = when
             self.assertIn("OK", self.check_payloads(health, features))
 
+    def test_platform_cache_missing_after_batch_is_reported_without_recharge(self):
+        from datetime import datetime
+        health, features = self.payloads()
+        features["platform_odds"] = {
+            "day": None, "status": "not_attempted",
+            "shared_cache_enabled": True, "cached_events": 0
+        }
+        with patch.object(monitor_bot, "datetime") as clock:
+            clock.now.return_value = datetime(2026, 11, 20, 15, 30,
+                                              tzinfo=monitor_bot.TZ)
+            with self.assertRaises(monitor_bot.MonitorError) as failure:
+                self.check_payloads(health, features)
+        self.assertEqual(failure.exception.code, "platform_cache_missing")
+        self.assertFalse(failure.exception.restartable)
+
+    def test_platform_update_valid_with_zero_events(self):
+        from datetime import datetime
+        health, features = self.payloads()
+        features["platform_odds"] = {
+            "day": "2026-11-20", "status": "ready", "cached_events": 0
+        }
+        with patch.object(monitor_bot, "datetime") as clock:
+            clock.now.return_value = datetime(2026, 11, 20, 15, 30,
+                                              tzinfo=monitor_bot.TZ)
+            self.assertIn("OK", self.check_payloads(health, features))
+
     def test_line_schema_validation_failure_is_reported(self):
         health, features = self.payloads()
         features["bot_started_epoch"] -= 400

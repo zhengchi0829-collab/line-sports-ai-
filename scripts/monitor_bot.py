@@ -111,12 +111,25 @@ def check(base):
                         expected.isoformat())
     # Platform quota/bad key needs an incident, NOT repeated billed retries.
     platform = features.get("platform_odds") or {}
-    if platform.get("status") in {"catalog_error", "missing_key"}:
+    if platform:
         now = datetime.now(TZ)
-        if now.hour >= 1 and platform.get("day") == now.date().isoformat():
-            raise MonitorError("platform_update_failed",
-                               "Daily platform odds update: " +
-                               str(platform.get("status")))
+        # The 00:30 batch can catch up until 03:00 on a sleeping Free server.
+        # Missing daily data after that window is a fault, not "no games".
+        # Reporting is read-only: never trigger chargeable odds API retries.
+        if now.hour >= 3 and platform.get("day") != now.date().isoformat():
+            raise MonitorError(
+                "platform_cache_missing",
+                "Platform odds scheduled snapshot unavailable after 03:00; "
+                "check shared free Key Value and today's 00:30 batch")
+        if platform.get("day") == now.date().isoformat() and (
+                platform.get("status") in {
+                    "catalog_error", "missing_key", "storage_unavailable",
+                    "attempted"}):
+            if now.hour >= 3:
+                raise MonitorError(
+                    "platform_update_failed",
+                    "Daily platform odds update: " +
+                    str(platform.get("status")))
     richmenu = features.get("richmenu") or {}
     if richmenu.get("action_count") == 0:
         raise MonitorError("richmenu_missing", "LINE rich menu has no actions", True)
