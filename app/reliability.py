@@ -572,7 +572,13 @@ class Fixtures:
         slot = latest_analysis_slot(now) if selected != now.date() else "live"
         key = (sport, selected, slot)
         cached = self.date_cache.get(key)
-        cache_ttl = 240 if selected == now.date() else 15 * 3600
+        # Missing or failed upstream data gets a short retry window, never
+        # a whole-day stale negative cache. Successful future/history pages
+        # can stay cached within the current scheduled refresh slot.
+        verified_cache = (cached is not None and
+                          cached[1].successes > 0 and not cached[1].errors)
+        cache_ttl = (15 * 3600 if selected != now.date() and verified_cache
+                     else 240)
         if cached and time.monotonic() - cached[0] < cache_ttl:
             log.info("dated_fixture_cache_hit sport=%s age_s=%d",
                      sport, int(time.monotonic() - cached[0]))

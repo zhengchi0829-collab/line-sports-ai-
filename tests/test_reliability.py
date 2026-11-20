@@ -97,6 +97,20 @@ class FastButtonTests(unittest.IsolatedAsyncioTestCase):
             self.assertIs(result, verified)
             await ctl.close()
 
+    async def test_failed_historical_date_cache_is_not_kept_for_hours(self):
+        async with httpx.AsyncClient(transport=httpx.MockTransport(
+                lambda req: httpx.Response(503))) as client:
+            ctl = Controller(UI, client)
+            from app.schedule import latest_analysis_slot
+            old_date = date(2026, 6, 1)
+            key = ("soccer_epl", old_date, latest_analysis_slot(datetime.now(TZ)))
+            stale = Snapshot([], datetime.now(TZ), ["upstream_unavailable"], 0)
+            ctl.fixtures.date_cache[key] = (time.monotonic() - 3600, stale)
+            updated = await ctl.fixtures.on_date("soccer_epl", old_date)
+            self.assertIsNot(updated, stale)
+            self.assertIn("http_503", json.dumps(updated.errors))
+            await ctl.close()
+
     async def test_verified_analysis_stats_cache_last_until_next_slot(self):
         """A repeat click should not rerun ESPN when last-five data was verified."""
         from app.schedule import latest_analysis_slot
