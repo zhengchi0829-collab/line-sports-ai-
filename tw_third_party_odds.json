@@ -1,104 +1,25 @@
 {
   "day": "2026-11-23",
-  "captured_at": "2026-11-23T03:38:24.443800+08:00",
+  "captured_at": "2026-11-23T04:31:51.036504+08:00",
   "source_url": "https://www.playsport.cc/gamesData/result?allianceid=4&gametime=20261123",
   "capture_method": "third_party_playsport",
   "source_note": "Third-party published Taiwan Sports Lottery reference odds. NOT verified with Taiwan Sports Lottery's live website. Please confirm against the official market before betting.",
   "leagues": {
-    "義甲": [
-      {
-        "event_id": "1180",
-        "away": "國際米蘭",
-        "home": "亞特蘭大",
-        "start": "2026-11-23T03:45:00+08:00",
-        "away_price": 1.45,
-        "home_price": 4.15,
-        "draw_price": 3.75,
-        "spread": null,
-        "spread_home_price": null,
-        "spread_away_price": null,
-        "total": 3.5,
-        "over_price": 1.85,
-        "under_price": 1.6
-      }
-    ],
-    "法甲": [
-      {
-        "event_id": "1183",
-        "away": "勒芒",
-        "home": "馬賽",
-        "start": "2026-11-23T03:45:00+08:00",
-        "away_price": 4.8,
-        "home_price": 1.35,
-        "draw_price": 3.85,
-        "spread": null,
-        "spread_home_price": null,
-        "spread_away_price": null,
-        "total": 3.5,
-        "over_price": 2.05,
-        "under_price": 1.46
-      }
-    ],
     "足球": [
-      {
-        "event_id": "1177",
-        "away": "秘魯體育大學",
-        "home": "萬卡約體育",
-        "start": "2026-11-23T04:00:00+08:00",
-        "away_price": 3.4,
-        "home_price": 1.6,
-        "draw_price": 3.15,
-        "spread": null,
-        "spread_home_price": null,
-        "spread_away_price": null,
-        "total": 2.5,
-        "over_price": 1.6,
-        "under_price": 1.85
-      },
-      {
-        "event_id": "1178",
-        "away": "西恩夏諾",
-        "home": "水晶體育",
-        "start": "2026-11-23T04:00:00+08:00",
-        "away_price": 5.35,
-        "home_price": 1.25,
-        "draw_price": 4.1,
-        "spread": null,
-        "spread_home_price": null,
-        "spread_away_price": null,
-        "total": 3.5,
-        "over_price": 1.82,
-        "under_price": 1.62
-      },
-      {
-        "event_id": "1187",
-        "away": "阿爾巴塞特",
-        "home": "布哥斯",
-        "start": "2026-11-23T04:00:00+08:00",
-        "away_price": 3.25,
-        "home_price": 1.85,
-        "draw_price": 2.8,
-        "spread": null,
-        "spread_home_price": null,
-        "spread_away_price": null,
-        "total": 2.5,
-        "over_price": 2.0,
-        "under_price": 1.48
-      },
       {
         "event_id": "1190",
         "away": "天主教大學",
         "home": "科洛科洛",
         "start": "2026-11-23T05:00:00+08:00",
-        "away_price": 2.55,
-        "home_price": 2.0,
-        "draw_price": 3.05,
+        "away_price": 2.3,
+        "home_price": 2.15,
+        "draw_price": 3.0,
         "spread": null,
         "spread_home_price": null,
         "spread_away_price": null,
         "total": 2.5,
-        "over_price": 1.48,
-        "under_price": 2.0
+        "over_price": 1.55,
+        "under_price": 1.9
       },
       {
         "event_id": "1242",
@@ -172,8 +93,8 @@
         "spread_home_price": null,
         "spread_away_price": null,
         "total": 2.5,
-        "over_price": 1.28,
-        "under_price": 2.55
+        "over_price": 1.3,
+        "under_price": 2.5
       },
       {
         "event_id": "1203",
@@ -202,8 +123,8 @@
         "spread_home_price": null,
         "spread_away_price": null,
         "total": 1.5,
-        "over_price": 1.45,
-        "under_price": 2.07
+        "over_price": 1.43,
+        "under_price": 2.1
       },
       {
         "event_id": "1207",
@@ -225,9 +146,9 @@
         "away": "皇家鹽湖城",
         "home": "溫哥華白浪",
         "start": "2026-11-23T09:30:00+08:00",
-        "away_price": 4.6,
+        "away_price": 4.7,
         "home_price": 1.35,
-        "draw_price": 4.05,
+        "draw_price": 4.1,
         "spread": null,
         "spread_home_price": null,
         "spread_away_price": null,
@@ -270,9 +191,9 @@
         "away": "塞薩洛尼基阿里斯",
         "home": "特里波利斯",
         "start": "2026-11-23T23:00:00+08:00",
-        "away_price": 2.0,
-        "home_price": 2.8,
-        "draw_price": 2.75,
+        "away_price": 1.95,
+        "home_price": 2.85,
+        "draw_price": 2.7,
         "spread": null,
         "spread_home_price": null,
         "spread_away_price": null,
@@ -282,21 +203,6 @@
       }
     ],
     "西甲": [
-      {
-        "event_id": "1185",
-        "away": "馬德里競技",
-        "home": "赫塔菲",
-        "start": "2026-11-23T04:00:00+08:00",
-        "away_price": 1.4,
-        "home_price": 5.25,
-        "draw_price": 3.3,
-        "spread": null,
-        "spread_home_price": null,
-        "spread_away_price": null,
-        "total": 2.5,
-        "over_price": 1.88,
-        "under_price": 1.56
-      },
       {
         "event_id": "1193",
         "away": "米拉索爾",
