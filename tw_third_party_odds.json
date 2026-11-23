@@ -1,40 +1,25 @@
 {
   "day": "2026-11-24",
-  "captured_at": "2026-11-24T06:37:20.287757+08:00",
+  "captured_at": "2026-11-24T07:36:33.404086+08:00",
   "source_url": "https://www.playsport.cc/gamesData/result?allianceid=4&gametime=20261124",
   "capture_method": "third_party_playsport",
   "source_note": "Third-party published Taiwan Sports Lottery reference odds. NOT verified with Taiwan Sports Lottery's live website. Please confirm against the official market before betting.",
   "leagues": {
     "西甲": [
       {
-        "event_id": "1069",
-        "away": "聖保羅SP",
-        "home": "博塔弗戈",
-        "start": "2026-11-24T07:00:00+08:00",
-        "away_price": 2.7,
-        "home_price": 1.95,
-        "draw_price": 2.85,
-        "spread": null,
-        "spread_home_price": null,
-        "spread_away_price": null,
-        "total": 2.5,
-        "over_price": 1.78,
-        "under_price": 1.65
-      },
-      {
         "event_id": "1074",
         "away": "格雷米奧",
         "home": "桑托斯SP",
         "start": "2026-11-24T08:00:00+08:00",
-        "away_price": 3.85,
-        "home_price": 1.45,
-        "draw_price": 3.45,
+        "away_price": 3.75,
+        "home_price": 1.5,
+        "draw_price": 3.4,
         "spread": null,
         "spread_home_price": null,
         "spread_away_price": null,
         "total": 3.5,
-        "over_price": 2.0,
-        "under_price": 1.48
+        "over_price": 2.07,
+        "under_price": 1.45
       }
     ],
     "足球": [
@@ -50,16 +35,16 @@
         "spread_home_price": null,
         "spread_away_price": null,
         "total": 2.5,
-        "over_price": 1.53,
-        "under_price": 1.93
+        "over_price": 1.56,
+        "under_price": 1.88
       },
       {
         "event_id": "1079",
         "away": "肯塔吉內斯",
         "home": "阿拉倫斯",
         "start": "2026-11-24T10:00:00+08:00",
-        "away_price": 3.2,
-        "home_price": 1.75,
+        "away_price": 3.3,
+        "home_price": 1.7,
         "draw_price": 2.8,
         "spread": null,
         "spread_home_price": null,
@@ -148,9 +133,9 @@
         "away": "柔佛DT",
         "home": "拉查武里",
         "start": "2026-11-24T20:15:00+08:00",
-        "away_price": 1.45,
-        "home_price": 3.8,
-        "draw_price": 3.5,
+        "away_price": 1.4,
+        "home_price": 4.1,
+        "draw_price": 3.6,
         "spread": null,
         "spread_home_price": null,
         "spread_away_price": null,
