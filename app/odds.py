@@ -998,13 +998,14 @@ class OddsGateway:
                         status["status"], status["count"], status["at"])
             return status
 
-    def official_daily_rows(self, league, day):
+    def official_daily_rows(self, league, day, *, now=None):
         """Read a verified, date-stamped sportslottery.com.tw odds snapshot.
 
         The scheduled assistant may update this repository JSON ONLY after
         successfully reading authorized official data. An empty placeholder
         must never be presented as real quotes.
         """
+        now = now or datetime.now(TZ)
         try:
             # Prefer the newest verified snapshot by capture time.
             # Remote odds branch gets refreshed without deploying bot code.
@@ -1028,6 +1029,10 @@ class OddsGateway:
                     continue
                 captured = parse_time(candidate.get("captured_at"))
                 if captured is None or captured.strftime("%Y-%m-%d") != day:
+                    continue
+                # Never show expired third-party quotes in the live daily menu.
+                if (is_third_party and day == now.date().isoformat()
+                        and not timedelta(minutes=-5) <= now - captured <= timedelta(minutes=90)):
                     continue
                 leagues = candidate.get("leagues")
                 if not isinstance(leagues, dict) or not isinstance(leagues.get(league), list):
@@ -1053,6 +1058,11 @@ class OddsGateway:
             for row in raw_rows:
                 if not isinstance(row, dict):
                     continue
+                # Published pre-match prices are not usable after kickoff.
+                if third_party and day == now.date().isoformat():
+                    kickoff = parse_time(row.get("start"))
+                    if kickoff is None or kickoff <= now:
+                        continue
                 # Keep the external snapshot isolated from provider labels.
                 clean = {
                     "source": ("台彩盤口（玩運彩第三方轉載，非官網核實）"

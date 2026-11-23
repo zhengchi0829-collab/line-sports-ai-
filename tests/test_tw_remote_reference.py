@@ -48,6 +48,28 @@ class RemoteOddsTests(unittest.IsolatedAsyncioTestCase):
             await gateway.refresh_remote_reference(NOW)
             self.assertEqual(len(calls), 1)
 
+    async def test_live_daily_menu_rejects_started_or_expired_third_party_quotes(self):
+        # No external network or chargeable odds request is used.
+        async with httpx.AsyncClient(transport=httpx.MockTransport(
+                lambda req: httpx.Response(404))) as client:
+            gateway = OddsGateway(client)
+            from pathlib import Path
+            gateway.official_snapshot_file = Path("/tmp/line_bot_test_no_official_922712.json")
+            gateway.third_party_snapshot_file = Path("/tmp/line_bot_test_no_third_922712.json")
+            snapshot = fixture()
+            started = dict(snapshot["leagues"]["足球"][0])
+            started["start"] = (NOW - timedelta(minutes=5)).isoformat()
+            snapshot["leagues"]["足球"].insert(0, started)
+            gateway.tw_remote = snapshot
+
+            rows = gateway.official_daily_rows("足球", NOW.date().isoformat(), now=NOW)
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["start"], "2026-11-16T23:00:00+08:00")
+
+            snapshot["captured_at"] = (NOW - timedelta(minutes=91)).isoformat()
+            self.assertEqual(
+                gateway.official_daily_rows("足球", NOW.date().isoformat(), now=NOW), [])
+
     async def test_invalid_source_is_not_accepted(self):
         broken = fixture()
         broken["source_url"] = "https://some-bookmaker.example/odds"
