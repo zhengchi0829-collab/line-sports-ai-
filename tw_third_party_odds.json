@@ -1,6 +1,6 @@
 {
   "day": "2026-11-23",
-  "captured_at": "2026-11-23T11:45:42.482049+08:00",
+  "captured_at": "2026-11-23T12:58:38.791381+08:00",
   "source_url": "https://www.playsport.cc/gamesData/result?allianceid=4&gametime=20261123",
   "capture_method": "third_party_playsport",
   "source_note": "Third-party published Taiwan Sports Lottery reference odds. NOT verified with Taiwan Sports Lottery's live website. Please confirm against the official market before betting.",
@@ -12,8 +12,8 @@
         "home": "皇家喀什米爾",
         "start": "2026-11-23T21:00:00+08:00",
         "away_price": 2.9,
-        "home_price": 1.75,
-        "draw_price": 2.95,
+        "home_price": 1.8,
+        "draw_price": 2.9,
         "spread": null,
         "spread_home_price": null,
         "spread_away_price": null,
@@ -26,9 +26,9 @@
         "away": "阿爾希拉爾",
         "home": "費爾干納納夫茲",
         "start": "2026-11-23T21:45:00+08:00",
-        "away_price": 1.26,
-        "home_price": 5.3,
-        "draw_price": 4.0,
+        "away_price": 1.23,
+        "home_price": 5.75,
+        "draw_price": 4.1,
         "spread": null,
         "spread_home_price": null,
         "spread_away_price": null,
@@ -42,7 +42,7 @@
         "home": "艾爾古納",
         "start": "2026-11-23T23:00:00+08:00",
         "away_price": 1.65,
-        "home_price": 3.6,
+        "home_price": 3.55,
         "draw_price": 2.75,
         "spread": null,
         "spread_home_price": null,
@@ -56,15 +56,15 @@
         "away": "亞歷山大伊蒂哈德",
         "home": "瓦迪德格拉",
         "start": "2026-11-23T23:00:00+08:00",
-        "away_price": 2.7,
+        "away_price": 2.6,
         "home_price": 2.15,
         "draw_price": 2.45,
         "spread": null,
         "spread_home_price": null,
         "spread_away_price": null,
         "total": 1.5,
-        "over_price": 1.43,
-        "under_price": 2.1
+        "over_price": 1.45,
+        "under_price": 2.07
       },
       {
         "event_id": "1226",
@@ -72,14 +72,14 @@
         "home": "特里波利斯",
         "start": "2026-11-23T23:00:00+08:00",
         "away_price": 1.95,
-        "home_price": 2.85,
+        "home_price": 2.8,
         "draw_price": 2.7,
         "spread": null,
         "spread_home_price": null,
         "spread_away_price": null,
         "total": 2.5,
-        "over_price": 1.88,
-        "under_price": 1.56
+        "over_price": 1.9,
+        "under_price": 1.55
       }
     ]
   }
