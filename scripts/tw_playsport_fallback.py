@@ -133,7 +133,7 @@ def total_market(cells, direction):
 def league_label(info):
     if "英格蘭超級" in info or "英超" in info:
         return "英超"
-    if "西班牙甲級" in info or "西甲" in info:
+    if "西班牙甲級" in info or re.search(r"(?<![巴墨])西甲", info):
         return "西甲"
     if "德國甲級" in info or "德甲" in info:
         return "德甲"

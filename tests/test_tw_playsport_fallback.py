@@ -26,6 +26,13 @@ NOW = datetime(2026, 11, 16, 16, 59, tzinfo=TZ)
 
 
 class PlaySportTests(unittest.TestCase):
+    def test_other_leagues_are_not_mislabeled_as_laliga(self):
+        for name, expected in (("巴西甲", "足球"), ("墨西甲", "足球"),
+                               ("西甲", "西甲"), ("西班牙甲級", "西甲")):
+            with self.subTest(league=name):
+                html = HTML.replace("歐洲國家聯賽", name)
+                self.assertEqual(list(parse_football(html, NOW.date(), cutoff=NOW)), [expected])
+
     def test_realistic_public_odds(self):
         result = parse_football(HTML, NOW.date(), cutoff=NOW)
         self.assertEqual(list(result), ["足球"])
