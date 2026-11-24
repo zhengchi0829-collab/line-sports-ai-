@@ -1,6 +1,6 @@
 {
   "day": "2026-11-24",
-  "captured_at": "2026-11-24T12:51:34.355229+08:00",
+  "captured_at": "2026-11-24T13:45:54.793084+08:00",
   "source_url": "https://www.playsport.cc/gamesData/result?allianceid=4&gametime=20261124",
   "capture_method": "third_party_playsport",
   "source_note": "Third-party published Taiwan Sports Lottery reference odds. NOT verified with Taiwan Sports Lottery's live website. Please confirm against the official market before betting.",
@@ -11,9 +11,9 @@
         "away": "柏雷素爾",
         "home": "紐卡索噴射機",
         "start": "2026-11-24T15:45:00+08:00",
-        "away_price": 1.26,
-        "home_price": 4.95,
-        "draw_price": 4.3,
+        "away_price": 1.22,
+        "home_price": 5.4,
+        "draw_price": 4.45,
         "spread": null,
         "spread_home_price": null,
         "spread_away_price": null,
@@ -26,9 +26,9 @@
         "away": "北京國安",
         "home": "大田韓亞市民",
         "start": "2026-11-24T18:00:00+08:00",
-        "away_price": 4.35,
+        "away_price": 4.25,
         "home_price": 1.4,
-        "draw_price": 3.55,
+        "draw_price": 3.5,
         "spread": null,
         "spread_home_price": null,
         "spread_away_price": null,
@@ -41,15 +41,15 @@
         "away": "浦項製鐵",
         "home": "京都不死鳥",
         "start": "2026-11-24T18:00:00+08:00",
-        "away_price": 4.2,
+        "away_price": 4.3,
         "home_price": 1.5,
         "draw_price": 3.1,
         "spread": null,
         "spread_home_price": null,
         "spread_away_price": null,
         "total": 2.5,
-        "over_price": 1.85,
-        "under_price": 1.6
+        "over_price": 1.86,
+        "under_price": 1.58
       },
       {
         "event_id": "1002",
@@ -78,8 +78,8 @@
         "spread_home_price": null,
         "spread_away_price": null,
         "total": 2.5,
-        "over_price": 1.53,
-        "under_price": 1.93
+        "over_price": 1.5,
+        "under_price": 1.96
       },
       {
         "event_id": "1083",
@@ -87,7 +87,7 @@
         "home": "拉查武里",
         "start": "2026-11-24T20:15:00+08:00",
         "away_price": 1.4,
-        "home_price": 4.2,
+        "home_price": 4.15,
         "draw_price": 3.75,
         "spread": null,
         "spread_home_price": null,
@@ -168,8 +168,8 @@
         "spread_home_price": null,
         "spread_away_price": null,
         "total": 2.5,
-        "over_price": 2.15,
-        "under_price": 1.42
+        "over_price": 2.1,
+        "under_price": 1.43
       },
       {
         "event_id": "1108",
