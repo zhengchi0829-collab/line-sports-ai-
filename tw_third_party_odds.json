@@ -1,6 +1,6 @@
 {
   "day": "2026-11-27",
-  "captured_at": "2026-11-27T17:51:36.479263+08:00",
+  "captured_at": "2026-11-27T18:41:51.327303+08:00",
   "source_url": "https://www.playsport.cc/gamesData/result?allianceid=4&gametime=20261127",
   "capture_method": "third_party_playsport",
   "source_note": "Third-party published Taiwan Sports Lottery reference odds. NOT verified with Taiwan Sports Lottery's live website. Please confirm against the official market before betting.",
@@ -11,8 +11,8 @@
         "away": "河內公安",
         "home": "南定",
         "start": "2026-11-27T19:00:00+08:00",
-        "away_price": 2.15,
-        "home_price": 2.2,
+        "away_price": 2.2,
+        "home_price": 2.15,
         "draw_price": 3.0,
         "spread": null,
         "spread_home_price": null,
@@ -26,15 +26,15 @@
         "away": "寧平",
         "home": "乂安藍江",
         "start": "2026-11-27T19:00:00+08:00",
-        "away_price": 1.9,
-        "home_price": 3.0,
-        "draw_price": 2.6,
+        "away_price": 1.85,
+        "home_price": 3.05,
+        "draw_price": 2.65,
         "spread": null,
         "spread_home_price": null,
         "spread_away_price": null,
         "total": 2.5,
-        "over_price": 1.7,
-        "under_price": 1.73
+        "over_price": 1.73,
+        "under_price": 1.7
       },
       {
         "event_id": "1053",
@@ -71,15 +71,15 @@
         "away": "吉蘭丹紅勇士",
         "home": "汶萊DPMM",
         "start": "2026-11-27T20:15:00+08:00",
-        "away_price": 7.0,
+        "away_price": 7.25,
         "home_price": 1.1,
-        "draw_price": 4.95,
+        "draw_price": 4.9,
         "spread": null,
         "spread_home_price": null,
         "spread_away_price": null,
         "total": 3.5,
-        "over_price": 1.62,
-        "under_price": 1.82
+        "over_price": 1.6,
+        "under_price": 1.85
       },
       {
         "event_id": "1142",
@@ -108,8 +108,8 @@
         "spread_home_price": null,
         "spread_away_price": null,
         "total": 2.5,
-        "over_price": 1.93,
-        "under_price": 1.53
+        "over_price": 1.9,
+        "under_price": 1.55
       },
       {
         "event_id": "1087",
@@ -118,13 +118,13 @@
         "start": "2026-11-27T20:30:00+08:00",
         "away_price": 3.9,
         "home_price": 1.55,
-        "draw_price": 2.9,
+        "draw_price": 2.85,
         "spread": null,
         "spread_home_price": null,
         "spread_away_price": null,
         "total": 2.5,
-        "over_price": 1.96,
-        "under_price": 1.5
+        "over_price": 2.07,
+        "under_price": 1.45
       },
       {
         "event_id": "1093",
@@ -168,23 +168,23 @@
         "spread_home_price": null,
         "spread_away_price": null,
         "total": 3.5,
-        "over_price": 1.5,
-        "under_price": 1.96
+        "over_price": 1.48,
+        "under_price": 2.0
       },
       {
         "event_id": "1168",
         "away": "特日內茨",
         "home": "伊赫拉瓦",
         "start": "2026-11-27T23:00:00+08:00",
-        "away_price": 4.2,
+        "away_price": 4.15,
         "home_price": 1.4,
-        "draw_price": 3.75,
+        "draw_price": 3.7,
         "spread": null,
         "spread_home_price": null,
         "spread_away_price": null,
         "total": 3.5,
-        "over_price": 1.85,
-        "under_price": 1.6
+        "over_price": 1.9,
+        "under_price": 1.55
       },
       {
         "event_id": "1215",
